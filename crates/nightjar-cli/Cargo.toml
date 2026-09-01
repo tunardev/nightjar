@@ -1,0 +1,46 @@
+[package]
+name = "nightjar-cli"
+description.workspace = true
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+nightjar-config.workspace = true
+nightjar-core.workspace = true
+nightjar-daemon.workspace = true
+nightjar-remote.workspace = true
+nightjar-runner.workspace = true
+nightjar-schedule.workspace = true
+nightjar-store.workspace = true
+nightjar-tui.workspace = true
+nightjar-web.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+jiff.workspace = true
+libc.workspace = true
+owo-colors.workspace = true
+serde_json.workspace = true
+toml_edit.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+jiff.workspace = true
+portable-pty.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+uuid.workspace = true
+
+[[bin]]
+name = "nightjar"
+path = "src/main.rs"
