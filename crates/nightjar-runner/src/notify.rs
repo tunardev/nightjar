@@ -213,11 +213,16 @@ fn notify_command(exe: &std::path::Path, alert: &Alert, on_failure: &OnFailure) 
 /// The reader on the other end blocks on EOF until every holder closes it,
 /// including this child, for as long as its channel timeout takes.
 fn notify_log_file() -> Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
     let paths = Paths::resolve()?;
     paths.ensure_dirs()?;
+    // A failed channel's error can quote the webhook host or the failure
+    // command, so the log is the owner's alone.
     OpenOptions::new()
         .create(true)
         .append(true)
+        .mode(0o600)
         .open(paths.data_dir.join("notify.log"))
         .context("opening notify.log")
 }

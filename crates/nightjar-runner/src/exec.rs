@@ -107,6 +107,19 @@ pub struct Outcome {
     pub caught_signal: Option<libc::c_int>,
 }
 
+/// Output can hold whatever the job printed, redacted only for declared
+/// secrets, so the capture file is readable by its owner alone.
+fn create_private(path: &Path) -> Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .with_context(|| format!("creating {}", path.display()))
+}
+
 fn shell_for(job: &Job) -> String {
     job.shell
         .clone()
@@ -165,8 +178,8 @@ pub fn execute(
     if let Some(dir) = out_path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    let out_file = File::create(&out_path)?;
-    let err_file = File::create(&err_path)?;
+    let out_file = create_private(&out_path)?;
+    let err_file = create_private(&err_path)?;
 
     let shell = shell_for(job);
     let mut cmd = Command::new(&shell);
@@ -738,6 +751,26 @@ mod tests {
         assert_eq!(run.exit_code, Some(0));
         assert!(run.duration_ms.unwrap() >= 0);
         assert_eq!(read(&run.stdout_path.unwrap()).trim(), "hello");
+    }
+
+    #[test]
+    fn capture_files_are_readable_by_the_owner_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let f = fixture();
+        let j = job("private", "echo out; echo err 1>&2", None);
+        execute_with_notifier(&j, "r1", &f, &RecordingNotifier::default()).unwrap();
+
+        let run = f.store.last_run("private").unwrap().unwrap();
+        for path in [run.stdout_path.unwrap(), run.stderr_path.unwrap()] {
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(
+                mode & 0o077,
+                0,
+                "{} is readable by group or others: {:o}",
+                path.display(),
+                mode & 0o777
+            );
+        }
     }
 
     #[test]

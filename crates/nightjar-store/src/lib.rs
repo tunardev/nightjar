@@ -31,6 +31,7 @@ impl Store {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating {}", parent.display()))?;
         }
+        let created_here = !db_path.exists();
 
         let mut last_err = None;
         for attempt in 0..OPEN_RETRIES {
@@ -43,7 +44,12 @@ impl Store {
             // the lock instead of failing.
             conn.busy_timeout(std::time::Duration::from_secs(5))?;
             match schema::migrate(&conn) {
-                Ok(()) => return Ok(Store { conn }),
+                Ok(()) => {
+                    if created_here {
+                        make_private(db_path)?;
+                    }
+                    return Ok(Store { conn });
+                }
                 Err(e) if is_database_busy(&e) => last_err = Some(e),
                 Err(e) => return Err(e),
             }
@@ -84,8 +90,49 @@ impl Store {
     }
 }
 
+/// Run history names every job and every failure; `SQLite` creates the
+/// file `0644`, world-readable wherever the home directory is. The `-wal`
+/// and `-shm` files inherit the main file's mode, so this one call covers
+/// all three. Only applied to a file this process created: an existing
+/// database keeps whatever the user set.
+fn make_private(db_path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(db_path, std::fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("restricting permissions on {}", db_path.display()))
+}
+
 pub fn is_database_busy(e: &anyhow::Error) -> bool {
     e.downcast_ref::<rusqlite::Error>()
         .and_then(rusqlite::Error::sqlite_error_code)
         .is_some_and(|c| c == rusqlite::ErrorCode::DatabaseBusy)
+}
+
+#[cfg(test)]
+mod permission_tests {
+    use super::Store;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn mode_of(path: &std::path::Path) -> u32 {
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn a_database_created_by_open_is_readable_by_the_owner_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join("nightjar.db");
+        Store::open(&db).unwrap();
+        assert_eq!(mode_of(&db), 0o600);
+    }
+
+    #[test]
+    fn an_existing_database_keeps_its_permissions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join("nightjar.db");
+        Store::open(&db).unwrap();
+        std::fs::set_permissions(&db, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        Store::open(&db).unwrap();
+
+        assert_eq!(mode_of(&db), 0o644, "not ours to change once it exists");
+    }
 }

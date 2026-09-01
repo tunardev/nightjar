@@ -96,6 +96,11 @@ impl Paths {
         )
     }
 
+    /// Directories this creates are private to the user (`0700`). Job
+    /// files can hold `[env]` values and run output can hold anything a
+    /// job printed, and on a shared machine a home directory is often
+    /// world-readable. A directory that already exists is left as it is:
+    /// its permissions are the user's choice, not this tool's.
     pub fn ensure_dirs(&self) -> Result<()> {
         for d in [
             &self.config_dir,
@@ -103,7 +108,7 @@ impl Paths {
             &self.data_dir,
             &self.runs_dir,
         ] {
-            std::fs::create_dir_all(d).with_context(|| format!("creating {}", d.display()))?;
+            create_private_dir(d)?;
         }
         Ok(())
     }
@@ -119,6 +124,28 @@ impl Paths {
     pub fn job_file(&self, job: &str) -> Result<PathBuf> {
         validate_job_name(job)?;
         Ok(self.jobs_dir.join(format!("{job}.toml")))
+    }
+}
+
+/// Creates `dir` with mode `0700` if it does not exist. Parents that are
+/// missing are created with the default mode: `~/.config` or
+/// `~/.local/share` are shared with every other tool and not this one's
+/// to lock down.
+fn create_private_dir(dir: &Path) -> Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+
+    if dir.is_dir() {
+        return Ok(());
+    }
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+        Ok(()) => Ok(()),
+        // Lost a race with another nightjar process creating the same dir.
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && dir.is_dir() => Ok(()),
+        Err(e) => Err(e).with_context(|| format!("creating {}", dir.display())),
     }
 }
 
@@ -166,6 +193,41 @@ mod tests {
 
         p.ensure_dirs().unwrap();
         assert!(p.jobs_dir.is_dir());
+    }
+
+    fn mode_of(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn ensure_dirs_creates_directories_only_the_user_can_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = Paths::for_root(&tmp.path().join("nested").join("home"));
+
+        p.ensure_dirs().unwrap();
+
+        for dir in [&p.config_dir, &p.jobs_dir, &p.data_dir, &p.runs_dir] {
+            assert_eq!(mode_of(dir), 0o700, "{}", dir.display());
+        }
+        assert_ne!(
+            mode_of(&tmp.path().join("nested")),
+            0o700,
+            "a shared parent directory is not nightjar's to lock down"
+        );
+    }
+
+    #[test]
+    fn ensure_dirs_leaves_an_existing_directory_permissions_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let p = Paths::for_root(tmp.path());
+        std::fs::create_dir(&p.jobs_dir).unwrap();
+        std::fs::set_permissions(&p.jobs_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        p.ensure_dirs().unwrap();
+
+        assert_eq!(mode_of(&p.jobs_dir), 0o755);
     }
 
     #[test]
