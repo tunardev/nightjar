@@ -1,0 +1,31 @@
+[package]
+name = "nightjar-web"
+description.workspace = true
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+nightjar-core.workspace = true
+nightjar-config.workspace = true
+nightjar-store.workspace = true
+anyhow.workspace = true
+base64.workspace = true
+jiff.workspace = true
+serde_json.workspace = true
+subtle.workspace = true
+tiny_http.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+rusqlite.workspace = true
+tempfile.workspace = true
+ureq.workspace = true
