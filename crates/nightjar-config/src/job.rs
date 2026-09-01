@@ -6,6 +6,11 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// Longer than any real job, and far inside what a wall-clock deadline
+/// can represent; past it, a run would record `unknown` every time
+/// instead of ever starting.
+const MAX_TIMEOUT: Duration = Duration::from_secs(365 * 86_400);
+
 /// A chain longer than this is a load error. Each job has at most one
 /// parent, so a chain's depth is the only thing bounding it.
 const MAX_AFTER_DEPTH: usize = 32;
@@ -412,7 +417,16 @@ impl Job {
         };
 
         let timeout = match raw.timeout.as_deref() {
-            Some(t) => Some(parse_duration(t).with_context(|| format!("job {name:?}: timeout"))?),
+            Some(t) => {
+                let d = parse_duration(t).with_context(|| format!("job {name:?}: timeout"))?;
+                if d > MAX_TIMEOUT {
+                    bail!(
+                        "job {name:?}: timeout: {t:?} is longer than the {}-day maximum",
+                        MAX_TIMEOUT.as_secs() / 86_400
+                    );
+                }
+                Some(d)
+            }
             None => None,
         };
 
@@ -720,6 +734,32 @@ webook = "https://example.com/hook"
         let p = write(tmp.path(), "bad", "command = \"\"\nschedule = \"hourly\"\n");
         let err = Job::load(&p).unwrap_err().to_string();
         assert!(err.contains("command"), "message was: {err}");
+    }
+
+    #[test]
+    fn timeout_is_rejected_when_it_is_longer_than_a_year() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = write(
+            tmp.path(),
+            "forever",
+            "command = \"true\"\nschedule = \"hourly\"\ntimeout = \"400d\"\n",
+        );
+        let err = Job::load(&p).unwrap_err().to_string();
+        assert!(
+            err.contains("timeout") && err.contains("400d"),
+            "got: {err}"
+        );
+
+        let p = write(
+            tmp.path(),
+            "year",
+            "command = \"true\"\nschedule = \"hourly\"\ntimeout = \"365d\"\n",
+        );
+        assert_eq!(
+            Job::load(&p).unwrap().timeout,
+            Some(Duration::from_secs(365 * 86_400)),
+            "the maximum itself is allowed"
+        );
     }
 
     #[test]
