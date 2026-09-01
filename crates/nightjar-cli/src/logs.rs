@@ -1,6 +1,6 @@
 use crate::merged::{self, HostPayload, HostView};
 use crate::read_captured;
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use nightjar_core::format::json_string;
 use nightjar_core::paths::Paths;
 use nightjar_remote::HostResult;
@@ -160,17 +160,30 @@ fn follow_run(store: &Store, run: &Run, out_from: u64, err_from: u64) -> Result<
     }
 }
 
+/// Reads from `from` to the end, never the whole file: `-f` polls several
+/// times a second, and re-reading a capture near `output_cap` each time
+/// would cost tens of megabytes a second for a job that prints a lot.
 fn tail_new_bytes(path: Option<&Path>, from: u64, w: &mut dyn Write) -> Result<u64> {
+    use std::io::{Read, Seek, SeekFrom};
+
     let Some(p) = path else { return Ok(from) };
-    let Some(bytes) = read_captured(p)? else {
-        return Ok(from);
+    let mut file = match std::fs::File::open(p) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(from),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", p.display())),
     };
-    let len = bytes.len() as u64;
-    if len > from {
-        let from = usize::try_from(from).unwrap_or(usize::MAX);
-        w.write_all(&bytes[from..])?;
+    let len = file
+        .metadata()
+        .with_context(|| format!("reading {}", p.display()))?
+        .len();
+    if len <= from {
+        return Ok(from);
     }
-    Ok(len.max(from))
+    file.seek(SeekFrom::Start(from))?;
+    let mut fresh = Vec::new();
+    file.read_to_end(&mut fresh)?;
+    w.write_all(&fresh)?;
+    Ok(from + fresh.len() as u64)
 }
 
 fn emit_json(run: &Run, lines: Option<usize>) -> Result<i32> {
@@ -275,6 +288,49 @@ mod tests {
         assert_eq!(last_n_lines(text, 2), b"d\ne\n");
         assert_eq!(last_n_lines(text, 0), b"");
         assert_eq!(last_n_lines(text, 100), text);
+    }
+
+    #[test]
+    fn tail_new_bytes_writes_only_what_arrived_since_the_last_offset() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("r.out");
+        std::fs::write(&path, b"abc").unwrap();
+
+        let mut out = Vec::new();
+        let at = tail_new_bytes(Some(&path), 0, &mut out).unwrap();
+        assert_eq!((at, out.as_slice()), (3, &b"abc"[..]));
+
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"de")
+            .unwrap();
+        let mut out = Vec::new();
+        let at = tail_new_bytes(Some(&path), at, &mut out).unwrap();
+        assert_eq!((at, out.as_slice()), (5, &b"de"[..]));
+
+        let mut out = Vec::new();
+        let at = tail_new_bytes(Some(&path), at, &mut out).unwrap();
+        assert_eq!(
+            (at, out.as_slice()),
+            (5, &b""[..]),
+            "nothing new, nothing written"
+        );
+    }
+
+    #[test]
+    fn tail_new_bytes_keeps_the_offset_when_the_file_is_missing_or_shorter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("gone.out");
+        let mut out = Vec::new();
+        assert_eq!(tail_new_bytes(Some(&missing), 7, &mut out).unwrap(), 7);
+        assert_eq!(tail_new_bytes(None, 7, &mut out).unwrap(), 7);
+
+        let short = tmp.path().join("short.out");
+        std::fs::write(&short, b"ab").unwrap();
+        assert_eq!(tail_new_bytes(Some(&short), 7, &mut out).unwrap(), 7);
+        assert!(out.is_empty());
     }
 
     #[test]
