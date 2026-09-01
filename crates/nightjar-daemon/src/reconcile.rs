@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use jiff::Timestamp;
 use nightjar_config::{Catchup, Job, Overlap};
 use nightjar_core::limits::MAX_SLEEP;
-use nightjar_store::run::{RunStatus, Trigger};
+use nightjar_store::run::Trigger;
 
 /// The largest gap `tick` accepts as an ordinary tick of this process, not
 /// an outage. Two `MAX_SLEEP`s of slack covers a slow tick, a busy store,
@@ -38,10 +38,13 @@ impl Daemon {
             }
             // Not `finish_run`: `report_exec_exit` can reach the same row
             // in the same tick and must not overwrite it.
-            if self
-                .store
-                .finish_unfinished_run(&run.id, RunStatus::Unknown, None, now, 0)?
-            {
+            let reason = match run.pid {
+                Some(pid) => {
+                    format!("nightjar exec (pid {pid}) is gone and never recorded an outcome")
+                }
+                None => "nightjar exec never recorded a pid or an outcome".to_string(),
+            };
+            if self.finish_unknown(&run.id, &reason)? {
                 reconciled += 1;
                 self.prune_job_now(&run.job);
             }

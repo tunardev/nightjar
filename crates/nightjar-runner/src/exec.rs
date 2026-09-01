@@ -220,6 +220,10 @@ pub fn execute(
         Ok(child) => child,
         Err(e) => {
             store.finish_run(run_id, RunStatus::Failure, None, clock.now(), 0)?;
+            // The only place this reason survives: the wrapper's own stderr
+            // is /dev/null when the daemon spawned it. An OS error names no
+            // secret, so it is safe to show.
+            let _ = store.set_run_message(run_id, &format!("cannot start {shell}: {e}"));
             dispatch_alert(
                 job,
                 RunStatus::Failure,
@@ -267,6 +271,7 @@ pub fn execute(
                 // Neither `success` nor `failure` is provable here. Leaving the row
                 // `running` would hide the run from every downstream reader.
                 let _ = store.finish_run(run_id, RunStatus::Unknown, None, clock.now(), 0);
+                let _ = store.set_run_message(run_id, &format!("{e:#}"));
                 return Err(e);
             }
         };
@@ -951,6 +956,11 @@ mod tests {
         let run = f.store.last_run("nospawn").unwrap().unwrap();
         assert_eq!(run.status, RunStatus::Failure);
         assert_eq!(run.pid, None, "no process ever existed to have a pid");
+        let message = run.message.expect("the row must say why it failed");
+        assert!(
+            message.contains("nightjar-test-shell"),
+            "the reason must name what could not start: {message}"
+        );
     }
 
     #[test]
@@ -985,6 +995,14 @@ mod tests {
         assert!(
             run.finished_at.is_some(),
             "unknown is still a finished state"
+        );
+        assert!(
+            run.message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("too large"),
+            "an unknown outcome must carry its reason: {:?}",
+            run.message
         );
     }
 

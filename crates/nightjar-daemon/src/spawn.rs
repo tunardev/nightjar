@@ -124,12 +124,9 @@ impl Daemon {
                      — recording it unknown",
                     spawned.job, spawned.run_id
                 );
-                self.store.finish_unfinished_run(
+                self.finish_unknown(
                     &spawned.run_id,
-                    RunStatus::Unknown,
-                    None,
-                    self.clock.now(),
-                    0,
+                    &format!("nightjar exec exited {status} before recording an outcome"),
                 )
             }
             Ok(None) => {
@@ -138,7 +135,7 @@ impl Daemon {
                      — the run did not reach the store; recording it unknown",
                     spawned.job, spawned.run_id
                 );
-                self.record_unstarted(spawned)
+                self.record_unstarted(spawned, status)
             }
             Err(e) => {
                 eprintln!(
@@ -160,7 +157,7 @@ impl Daemon {
     /// Writes the row a wrapper never got to, because it died before
     /// `start_run`. Uses the spawn time, not now, so the occurrence lands
     /// where it belongs on the job's timeline.
-    fn record_unstarted(&self, spawned: &SpawnedExec) -> Result<bool> {
+    fn record_unstarted(&self, spawned: &SpawnedExec, status: ExitStatus) -> Result<bool> {
         let (stdout, stderr) = self.paths.run_output(&spawned.job, &spawned.run_id);
         self.store.start_run(
             &spawned.run_id,
@@ -170,12 +167,25 @@ impl Daemon {
             &stdout,
             &stderr,
         )?;
-        self.store.finish_unfinished_run(
+        self.finish_unknown(
             &spawned.run_id,
+            &format!("nightjar exec exited {status} before it could record the run"),
+        )
+    }
+
+    /// Terminal `unknown` plus the reason, so `status` and `logs` can say
+    /// why instead of leaving the user to guess.
+    pub(crate) fn finish_unknown(&self, run_id: &str, reason: &str) -> Result<bool> {
+        let finished = self.store.finish_unfinished_run(
+            run_id,
             RunStatus::Unknown,
             None,
             self.clock.now(),
             0,
-        )
+        )?;
+        if finished {
+            self.store.set_run_message(run_id, reason)?;
+        }
+        Ok(finished)
     }
 }

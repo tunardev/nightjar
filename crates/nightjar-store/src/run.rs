@@ -89,8 +89,9 @@ pub struct Run {
     pub stdout_path: Option<PathBuf>,
     pub stderr_path: Option<PathBuf>,
     pub output_bytes: u64,
-    /// A safe-to-show reason for a terminal status. Today, only which
-    /// secret failed to resolve. Never the resolver's own stderr — it
+    /// A safe-to-show reason for a terminal status: which secret failed
+    /// to resolve, why the shell could not start, or why the daemon
+    /// recorded the run `unknown`. Never a resolver's own stderr — it
     /// usually contains the secret.
     pub message: Option<String>,
 }
@@ -253,7 +254,7 @@ impl Store {
         Ok(())
     }
 
-    /// Only the secret-resolution failure path calls this.
+    /// Overwrites; the last writer's reason is the one that stands.
     pub fn set_run_message(&self, id: &str, message: &str) -> Result<()> {
         let affected = self.conn.execute(
             "UPDATE runs SET message = ?2 WHERE id = ?1",

@@ -579,6 +579,11 @@ fn running_row_becomes_unknown_at_startup_when_its_process_is_gone() {
         r.finished_at.is_some(),
         "an unknown run is finished, just not provably"
     );
+    let message = r.message.expect("an unknown row must say why");
+    assert!(
+        message.contains(&dead_pid.to_string()) && message.contains("gone"),
+        "got: {message}"
+    );
 }
 
 #[test]
@@ -630,9 +635,48 @@ fn running_row_becomes_unknown_when_it_has_no_pid() {
     let _d = Daemon::new(paths.clone(), clock).unwrap();
 
     let store = nightjar_store::Store::open(&paths.db_path).unwrap();
-    assert_eq!(
-        store.get_run("nopid").unwrap().unwrap().status,
-        RunStatus::Unknown
+    let r = store.get_run("nopid").unwrap().unwrap();
+    assert_eq!(r.status, RunStatus::Unknown);
+    assert!(
+        r.message.as_deref().unwrap_or_default().contains("pid"),
+        "got: {:?}",
+        r.message
+    );
+}
+
+#[test]
+fn run_left_unfinished_by_a_dying_exec_says_so_in_its_message() {
+    let (_t, paths) = setup(&[("j", "command = \"true\"\nschedule = \"every 1 minute\"\n")]);
+    let clock = Arc::new(FixedClock::new("2026-06-01T00:00:00Z".parse().unwrap()));
+    let spawner = AbandoningSpawner::new(paths.db_path.clone(), clock.clone());
+    let mut d = Daemon::with_spawner(paths.clone(), clock.clone(), spawner).unwrap();
+    let store = Store::open(&paths.db_path).unwrap();
+
+    d.tick().unwrap();
+    clock.advance(jiff::Span::new().seconds(60));
+    assert_eq!(d.tick().unwrap(), vec!["j".to_string()]);
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let run = loop {
+        let run = store.last_run("j").unwrap().unwrap();
+        if run.status != RunStatus::Running {
+            break run;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the abandoned row never went terminal"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+        d.tick().unwrap();
+    };
+
+    assert_eq!(run.status, RunStatus::Unknown);
+    let message = run
+        .message
+        .expect("the daemon must record why it gave up on the row");
+    assert!(
+        message.contains("exec exited") && message.contains('3'),
+        "got: {message}"
     );
 }
 
