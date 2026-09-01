@@ -95,8 +95,7 @@ pub fn cmd_edit(name: &str) -> Result<i32> {
     std::fs::write(&scratch.0, &original)
         .with_context(|| format!("writing {}", scratch.0.display()))?;
 
-    let status = std::process::Command::new(&editor)
-        .arg(&scratch.0)
+    let status = editor_command(&editor, &scratch.0)
         .status()
         .with_context(|| format!("running {editor:?} on {}", scratch.0.display()))?;
     if !status.success() {
@@ -119,6 +118,28 @@ pub fn cmd_edit(name: &str) -> Result<i32> {
     })?;
     println!("saved {}", path.display());
     Ok(0)
+}
+
+/// `EDITOR="code --wait"` and `EDITOR="vim -u NONE"` are ordinary
+/// settings, and git, crontab, and sudoedit all honour the arguments. A
+/// value with whitespace goes through `sh -c` with the file as `$1`;
+/// a bare program is run directly, so a non-UTF-8 path still works.
+fn editor_command(editor: &std::ffi::OsStr, file: &Path) -> std::process::Command {
+    match editor.to_str() {
+        Some(text) if text.chars().any(char::is_whitespace) => {
+            let mut cmd = std::process::Command::new("/bin/sh");
+            cmd.arg("-c")
+                .arg(format!("{text} \"$1\""))
+                .arg("nightjar-edit")
+                .arg(file);
+            cmd
+        }
+        _ => {
+            let mut cmd = std::process::Command::new(editor);
+            cmd.arg(file);
+            cmd
+        }
+    }
 }
 
 struct Scratch(PathBuf);
@@ -150,6 +171,54 @@ pub fn write_job_file_atomic(path: &Path, contents: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
+
+    fn argv(cmd: &std::process::Command) -> Vec<String> {
+        std::iter::once(cmd.get_program())
+            .chain(cmd.get_args())
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn editor_runs_directly_with_the_file_when_it_is_a_bare_program() {
+        let cmd = editor_command(OsStr::new("vim"), Path::new("/tmp/j.toml"));
+        assert_eq!(argv(&cmd), ["vim", "/tmp/j.toml"]);
+    }
+
+    #[test]
+    fn editor_runs_through_the_shell_with_the_file_as_dollar_one_when_it_has_arguments() {
+        let cmd = editor_command(OsStr::new("code --wait"), Path::new("/tmp/j.toml"));
+        assert_eq!(
+            argv(&cmd),
+            [
+                "/bin/sh",
+                "-c",
+                "code --wait \"$1\"",
+                "nightjar-edit",
+                "/tmp/j.toml"
+            ]
+        );
+    }
+
+    #[test]
+    fn editor_with_arguments_really_receives_the_file_last() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("j.toml");
+        let marker = tmp.path().join("seen");
+        std::fs::write(&file, "x").unwrap();
+        // Inner `sh -c` sees `--` as `$0`, so the file lands in `$1`.
+        let editor = format!("sh -c 'printf %s \"$1\" > {}' --", marker.display());
+
+        let status = editor_command(OsStr::new(&editor), &file).status().unwrap();
+
+        assert!(status.success());
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap(),
+            file.display().to_string(),
+            "the file path must reach the editor after its own arguments"
+        );
+    }
 
     #[test]
     fn existing_job_path_names_the_missing_job() {
