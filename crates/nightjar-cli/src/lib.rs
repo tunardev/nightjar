@@ -191,8 +191,7 @@ pub fn require_utf8_args(args: impl Iterator<Item = std::ffi::OsString>) -> Resu
 }
 
 pub fn run_cli(args: &[&str]) -> Result<i32> {
-    let hosts = parse_hosts(args)?;
-    let rest = strip_host_args(args)?;
+    let (hosts, rest) = split_host_args(args)?;
 
     let mut cli = match Cli::try_parse_from(
         std::iter::once("nightjar".to_string()).chain(rest.iter().cloned()),
@@ -207,56 +206,50 @@ pub fn run_cli(args: &[&str]) -> Result<i32> {
     dispatch(cli)
 }
 
-// Also accepts `--host=value`, matching the form clap itself would use.
-pub(crate) fn parse_hosts(args: &[&str]) -> Result<Vec<String>> {
+/// Pulls every `--host` out of `args` before clap sees them, so the flag
+/// is recognized wherever it falls relative to the subcommand. Also
+/// accepts `--host=value`, matching the form clap itself would use.
+/// Returns the hosts and the remaining arguments, in their original order.
+pub(crate) fn split_host_args(args: &[&str]) -> Result<(Vec<String>, Vec<String>)> {
     let mut hosts = Vec::new();
+    let mut rest = Vec::new();
     let mut i = 0;
     while i < args.len() {
-        if let Some(value) = args[i].strip_prefix("--host=") {
-            for h in value.split(',') {
-                validate_host(h)?;
-                hosts.push(h.to_string());
-            }
+        let value = if let Some(value) = args[i].strip_prefix("--host=") {
             i += 1;
+            value
         } else if args[i] == "--host" {
             let value = args.get(i + 1).context("--host requires a value")?;
-            for h in value.split(',') {
-                validate_host(h)?;
-                hosts.push(h.to_string());
-            }
             i += 2;
+            value
         } else {
+            rest.push(args[i].to_string());
             i += 1;
+            continue;
+        };
+        for h in value.split(',') {
+            validate_host(h)?;
+            hosts.push(h.to_string());
         }
     }
-    Ok(hosts)
+    Ok((hosts, rest))
 }
 
 /// `remote::ssh_argv`'s `--` terminator already neutralizes a host
 /// starting with `-`. This catches it earlier with a clearer error than
-/// ssh's own message.
+/// ssh's own message. An empty entry (`--host a,,b`, `--host ""`) or one
+/// with whitespace would reach ssh as a hostname it can only fail on.
 fn validate_host(host: &str) -> Result<()> {
+    if host.is_empty() {
+        bail!("invalid host: a host name cannot be empty");
+    }
     if host.starts_with('-') {
         bail!("invalid host {host:?}: a host name cannot start with \"-\"");
     }
-    Ok(())
-}
-
-fn strip_host_args(args: &[&str]) -> Result<Vec<String>> {
-    let mut rest = Vec::new();
-    let mut i = 0;
-    while i < args.len() {
-        if args[i] == "--host" {
-            args.get(i + 1).context("--host requires a value")?;
-            i += 2;
-        } else if args[i].starts_with("--host=") {
-            i += 1;
-        } else {
-            rest.push(args[i].to_string());
-            i += 1;
-        }
+    if host.chars().any(char::is_whitespace) {
+        bail!("invalid host {host:?}: a host name cannot contain whitespace");
     }
-    Ok(rest)
+    Ok(())
 }
 
 /// Remote is read-only. Mutating commands must never run silently against
@@ -517,17 +510,23 @@ mod serve_token_tests {
 mod host_tests {
     use super::*;
 
+    fn hosts(args: &[&str]) -> Vec<String> {
+        split_host_args(args).unwrap().0
+    }
+
+    fn rest(args: &[&str]) -> Vec<String> {
+        split_host_args(args).unwrap().1
+    }
+
     #[test]
     fn host_accepts_comma_list_and_repeated_flags() {
-        assert_eq!(
-            parse_hosts(&["--host", "a,b", "--host", "c"]).unwrap(),
-            ["a", "b", "c"]
-        );
+        assert_eq!(hosts(&["--host", "a,b", "--host", "c"]), ["a", "b", "c"]);
+        assert_eq!(hosts(&["--host=a,b", "--host=c"]), ["a", "b", "c"]);
     }
 
     #[test]
     fn host_is_rejected_before_it_ever_reaches_ssh_when_it_begins_with_a_dash() {
-        let err = parse_hosts(&["--host", "-oProxyCommand=x"]).unwrap_err();
+        let err = split_host_args(&["--host", "-oProxyCommand=x"]).unwrap_err();
         assert!(err.to_string().contains("cannot start with"), "got: {err}");
 
         let err = run_cli(&["--host", "-oProxyCommand=x", "status"]).unwrap_err();
@@ -536,7 +535,26 @@ mod host_tests {
 
     #[test]
     fn host_is_still_caught_when_it_is_dash_prefixed_among_others_in_a_comma_list() {
-        assert!(parse_hosts(&["--host", "web1,-oBad=1"]).is_err());
+        assert!(split_host_args(&["--host", "web1,-oBad=1"]).is_err());
+    }
+
+    #[test]
+    fn host_is_rejected_when_it_is_empty() {
+        for args in [
+            &["--host", "", "status"][..],
+            &["--host=", "status"][..],
+            &["--host", "a,,b", "status"][..],
+            &["--host", "a,", "status"][..],
+        ] {
+            let err = split_host_args(args).unwrap_err();
+            assert!(err.to_string().contains("empty"), "{args:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn host_is_rejected_when_it_contains_whitespace() {
+        let err = split_host_args(&["--host", "web 1"]).unwrap_err();
+        assert!(err.to_string().contains("whitespace"), "got: {err}");
     }
 
     #[test]
@@ -569,11 +587,8 @@ mod host_tests {
 
     #[test]
     fn cli_behaves_exactly_as_before_when_no_host_flag_is_given() {
-        assert!(parse_hosts(&["run", "backup"]).unwrap().is_empty());
-        assert_eq!(
-            strip_host_args(&["run", "backup"]).unwrap(),
-            ["run", "backup"]
-        );
+        assert!(hosts(&["run", "backup"]).is_empty());
+        assert_eq!(rest(&["run", "backup"]), ["run", "backup"]);
 
         let command = Commands::Run {
             job: "backup".to_string(),
@@ -586,20 +601,17 @@ mod host_tests {
 
     #[test]
     fn host_is_still_recognized_when_it_appears_after_subcommand() {
+        assert_eq!(hosts(&["run", "backup", "--host", "web1"]), ["web1"]);
         assert_eq!(
-            parse_hosts(&["run", "backup", "--host", "web1"]).unwrap(),
-            ["web1"]
-        );
-        assert_eq!(
-            strip_host_args(&["run", "backup", "--host", "web1"]).unwrap(),
+            rest(&["run", "backup", "--host", "web1"]),
             ["run", "backup"]
         );
+        assert_eq!(rest(&["run", "--host=web1", "backup"]), ["run", "backup"]);
     }
 
     #[test]
     fn host_flag_is_error_not_silently_dropped_when_dangling_with_no_value() {
-        assert!(parse_hosts(&["status", "--host"]).is_err());
-        assert!(strip_host_args(&["status", "--host"]).is_err());
+        assert!(split_host_args(&["status", "--host"]).is_err());
 
         let err = run_cli(&["status", "--host"]).unwrap_err();
         assert!(err.to_string().contains("--host"), "got: {err}");

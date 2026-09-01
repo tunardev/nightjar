@@ -134,8 +134,8 @@ pub fn validate_job_name(job: &str) -> Result<()> {
     if job.contains("..") {
         bail!("invalid job name {job:?}: must not contain \"..\"");
     }
-    if job.contains('\0') {
-        bail!("invalid job name {job:?}: must not contain a null byte");
+    if let Some(c) = job.chars().find(|c| c.is_control()) {
+        bail!("invalid job name {job:?}: must not contain the control character {c:?}");
     }
     Ok(())
 }
@@ -194,7 +194,16 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let p = Paths::for_root(tmp.path());
 
-        for name in ["../../../etc/hosts", "..", "a/b", "sub/../../x", ""] {
+        for name in [
+            "../../../etc/hosts",
+            "..",
+            "a/b",
+            "sub/../../x",
+            "",
+            "nul\0byte",
+            "line\nbreak",
+            "tab\there",
+        ] {
             let err = p.job_file(name).unwrap_err();
             assert!(
                 err.to_string().contains("job name"),
