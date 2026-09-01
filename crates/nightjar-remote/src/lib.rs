@@ -80,28 +80,7 @@ fn ssh_argv(host: &str, args: &[String]) -> Vec<String> {
     invocation
 }
 
-/// True for a token that round-trips through a POSIX shell unquoted.
-/// This keeps the common case readable and copy-pasteable.
-fn is_shell_safe(s: &str) -> bool {
-    !s.is_empty()
-        && s.bytes().all(|b| {
-            b.is_ascii_alphanumeric()
-                || matches!(
-                    b,
-                    b'-' | b'_' | b'.' | b'/' | b':' | b'@' | b'%' | b'+' | b','
-                )
-        })
-}
-
-/// An embedded `'` is escaped as `'\''`, since nothing can be escaped
-/// while single-quoted.
-pub fn shell_quote(s: &str) -> String {
-    if is_shell_safe(s) {
-        s.to_string()
-    } else {
-        format!("'{}'", s.replace('\'', r"'\''"))
-    }
-}
+pub use nightjar_core::shell::quote as shell_quote;
 
 struct RealHostRunner;
 

@@ -59,8 +59,12 @@ pub fn resolve(
     Ok(out)
 }
 
-/// Runs the resolver command for one secret and returns its stdout, minus a
-/// single trailing newline — the same convention shell `$(...)` uses, since
+/// Runs the resolver command for one secret. The location is quoted as
+/// one shell word: `op://Personal/My Vault/password` reaches `op read`
+/// intact, and a location can never end the resolver command and start
+/// another.
+///
+/// Returns the resolver's stdout minus a single trailing newline — the same convention shell `$(...)` uses, since
 /// `resolver = "op read {}"` is written and read the same way a command
 /// substitution would be.
 ///
@@ -68,7 +72,7 @@ pub fn resolve(
 /// the secret itself or a prompt for it, so it must never reach an error
 /// message or a log.
 fn resolve_one(resolver_template: &str, location: &str, timeout: Duration) -> Result<SecretValue> {
-    let command = resolver_template.replace("{}", location);
+    let command = resolver_template.replace("{}", &nightjar_core::shell::quote(location));
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
 
     let mut cmd = Command::new(&shell);
@@ -170,6 +174,29 @@ mod tests {
         assert_eq!(out.env[0].1.as_str(), "hunter2");
         assert_eq!(out.redact.len(), 1);
         assert_eq!(out.redact[0].as_str(), "hunter2");
+    }
+
+    #[test]
+    fn location_reaches_the_resolver_as_one_word_when_it_contains_spaces() {
+        let secrets = map(&[("PW", "op://Personal/My Vault/password")]);
+        let out = resolve(&secrets, Some("printf %s {}")).unwrap();
+        assert_eq!(out.env[0].1.as_str(), "op://Personal/My Vault/password");
+    }
+
+    #[test]
+    fn location_cannot_end_the_resolver_command_and_run_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("pwned");
+        let location = format!("x; touch {}", marker.display());
+        let secrets = map(&[("PW", location.as_str())]);
+
+        let out = resolve(&secrets, Some("printf %s {}")).unwrap();
+
+        assert_eq!(out.env[0].1.as_str(), location);
+        assert!(
+            !marker.exists(),
+            "the location must be data, never a second command"
+        );
     }
 
     #[test]
