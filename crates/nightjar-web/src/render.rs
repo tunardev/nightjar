@@ -205,7 +205,9 @@ pub(super) fn runs_page(
         return Ok(None);
     }
 
-    let config = Config::load(paths).unwrap_or_default();
+    // An error here surfaces as a 500, like any other failure to render:
+    // the daemon refuses the same config, and `doctor` names the problem.
+    let config = Config::load(paths)?;
     let runs = store.recent_runs(Some(job), config.retention_runs)?;
     let escaped_job = escape_html(job);
 
@@ -620,6 +622,26 @@ mod tests {
 
         let runs_html = runs_page(&store, &paths, "backup", now).unwrap().unwrap();
         assert!(runs_html.contains("no runs recorded"), "got: {runs_html}");
+    }
+
+    #[test]
+    fn runs_page_fails_loudly_when_config_is_malformed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = paths_with_jobs_dir(tmp.path());
+        write_job(
+            &paths.jobs_dir,
+            "backup",
+            "command = \"true\"\nschedule = \"hourly\"\n",
+        );
+        std::fs::write(
+            paths.config_dir.join("config.toml"),
+            "retention_runs = = 5\n",
+        )
+        .unwrap();
+
+        let store = Store::open_in_memory().unwrap();
+        let err = runs_page(&store, &paths, "backup", ts("2026-06-01T00:00:00Z")).unwrap_err();
+        assert!(err.to_string().contains("config.toml"), "got: {err:#}");
     }
 
     #[test]

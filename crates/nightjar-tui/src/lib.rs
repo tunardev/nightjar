@@ -167,7 +167,10 @@ fn load_state(
     use std::collections::BTreeMap;
 
     let now = clock.now();
-    let config = Config::load(paths).unwrap_or_default();
+    // Not `unwrap_or_default`: the daemon refuses a malformed config, and a
+    // view that quietly assumes defaults would show history pruned to a
+    // limit the user never set.
+    let config = Config::load(paths)?;
 
     let loaded: Vec<(String, Result<Job>)> = match probe_jobs_dir(&paths.jobs_dir)? {
         JobsDirState::Missing => Vec::new(),
@@ -214,4 +217,37 @@ fn load_state(
         runs,
         now,
     })
+}
+
+#[cfg(test)]
+mod load_state_tests {
+    use super::load_state;
+    use nightjar_core::clock::SystemClock;
+    use nightjar_core::paths::Paths;
+
+    #[test]
+    fn malformed_config_is_an_error_not_silently_defaulted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_root(tmp.path());
+        paths.ensure_dirs().unwrap();
+        std::fs::write(
+            paths.config_dir.join("config.toml"),
+            "retention_runs = = 5\n",
+        )
+        .unwrap();
+        let store = nightjar_store::Store::open(&paths.db_path).unwrap();
+
+        let err = load_state(&store, &paths, &SystemClock).unwrap_err();
+        assert!(err.to_string().contains("config.toml"), "got: {err:#}");
+    }
+
+    #[test]
+    fn state_loads_when_config_is_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_root(tmp.path());
+        paths.ensure_dirs().unwrap();
+        let store = nightjar_store::Store::open(&paths.db_path).unwrap();
+
+        assert!(load_state(&store, &paths, &SystemClock).is_ok());
+    }
 }
