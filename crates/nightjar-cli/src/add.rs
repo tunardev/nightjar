@@ -25,7 +25,7 @@ pub fn cmd_add(
 
     nightjar_config::jobfile::write_job_file_atomic(
         &path,
-        &build_job_toml(cmd, at, timeout, catchup),
+        &validated_job_toml(name, cmd, at, timeout, catchup)?,
     )?;
 
     println!("wrote {}", path.display());
@@ -33,6 +33,21 @@ pub fn cmd_add(
         "run `nightjar daemon` (or `nightjar service install` to survive reboot) for {name} to actually fire"
     );
     Ok(0)
+}
+
+/// The file `add` is about to write, checked the way the daemon will
+/// check it. Anything `Job::load` would refuse is refused here first, so
+/// `add` never leaves behind a job that shows up as `invalid`.
+fn validated_job_toml(
+    name: &str,
+    cmd: &str,
+    at: &str,
+    timeout: Option<&str>,
+    catchup: Option<&str>,
+) -> Result<String> {
+    let toml = build_job_toml(cmd, at, timeout, catchup);
+    nightjar_config::Job::from_toml_str(name, &toml)?;
+    Ok(toml)
 }
 
 fn build_job_toml(cmd: &str, at: &str, timeout: Option<&str>, catchup: Option<&str>) -> String {
@@ -56,6 +71,26 @@ mod tests {
     fn build_job_toml_produces_only_command_and_schedule_when_call_is_minimal() {
         let toml = build_job_toml("echo hi", "hourly", None, None);
         assert_eq!(toml, "command = \"echo hi\"\nschedule = \"hourly\"\n");
+    }
+
+    #[test]
+    fn add_refuses_a_timeout_the_job_file_could_not_load_with() {
+        let err = validated_job_toml("j", "true", "hourly", Some("5 minutes"), None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("timeout"), "got: {err}");
+    }
+
+    #[test]
+    fn add_refuses_a_catchup_value_outside_none_once_all() {
+        let err = validated_job_toml("j", "true", "hourly", None, Some("sometimes")).unwrap_err();
+        assert!(format!("{err:#}").contains("catchup"), "got: {err:#}");
+    }
+
+    #[test]
+    fn add_accepts_a_job_the_daemon_would_load() {
+        let toml = validated_job_toml("j", "true", "hourly", Some("30m"), Some("all")).unwrap();
+        assert!(toml.contains("catchup = \"all\""));
     }
 
     #[test]

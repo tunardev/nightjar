@@ -89,6 +89,27 @@ fn add_rejects_before_writing_anything_when_schedule_is_invalid() {
 }
 
 #[test]
+fn add_rejects_before_writing_anything_when_timeout_or_catchup_is_invalid() {
+    let tmp = tempfile::tempdir().unwrap();
+    for (flag, value, field) in [
+        ("--timeout", "5 minutes", "timeout"),
+        ("--catchup", "sometimes", "catchup"),
+    ] {
+        let out = nj(
+            tmp.path(),
+            &["add", "bad", "--cmd", "true", "--at", "hourly", flag, value],
+        );
+        assert!(!out.status.success(), "{flag} {value} must be refused");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(field), "the error must name the field: {err}");
+        assert!(
+            !tmp.path().join("jobs/bad.toml").exists(),
+            "a rejected {field} must leave no file"
+        );
+    }
+}
+
+#[test]
 fn add_rejects_when_job_name_contains_path_separator() {
     let tmp = tempfile::tempdir().unwrap();
     let out = nj(

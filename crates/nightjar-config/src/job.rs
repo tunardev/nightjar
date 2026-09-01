@@ -373,7 +373,19 @@ impl Job {
             std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let raw: RawJob =
             toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        Self::from_raw(name, raw)
+    }
 
+    /// Every check `load` performs, on text that may not be on disk yet.
+    /// `nightjar add` validates what it is about to write with this, so a
+    /// bad `--timeout` is refused instead of saved as a job that can
+    /// never load.
+    pub fn from_toml_str(name: &str, text: &str) -> Result<Job> {
+        let raw: RawJob = toml::from_str(text).with_context(|| format!("parsing job {name:?}"))?;
+        Self::from_raw(name.to_string(), raw)
+    }
+
+    fn from_raw(name: String, raw: RawJob) -> Result<Job> {
         if raw.command.trim().is_empty() {
             bail!("job {name:?}: command must not be empty");
         }
