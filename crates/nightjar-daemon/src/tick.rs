@@ -59,7 +59,7 @@ impl Daemon {
         // "in flight" and suppress the one make-up run the overlap policy
         // allows. Logged, not propagated: maintenance must not stop a tick.
         if let Err(e) = self.reconcile() {
-            eprintln!("nightjar: reconcile failed: {e:#}");
+            nightjar_core::log!("reconcile failed: {e:#}");
         }
 
         // `Job::load_all` returns an empty `Vec` for both a missing and an
@@ -86,7 +86,7 @@ impl Daemon {
             &mut self.logged_warnings,
             live.iter().flat_map(|j| j.warnings.iter()),
         ) {
-            eprintln!("nightjar: {warning}");
+            nightjar_core::log!("{warning}");
         }
 
         let live_names: std::collections::HashSet<&str> =
@@ -137,7 +137,7 @@ impl Daemon {
             match self.catch_up_gap(&live, since, now) {
                 Ok(names) => fired.extend(names),
                 Err(e) => {
-                    eprintln!("nightjar: catch-up failed: {e:#}");
+                    nightjar_core::log!("catch-up failed: {e:#}");
                     systemic_failure = true;
                     failure.get_or_insert(e);
                 }
@@ -162,7 +162,7 @@ impl Daemon {
                 Ok(Some(name)) => fired.push(name),
                 Ok(None) => {}
                 Err(e) => {
-                    eprintln!("nightjar: job {:?}: {e:#}", job.name);
+                    nightjar_core::log!("job {:?}: {e:#}", job.name);
                     failure.get_or_insert(e);
                 }
             }
@@ -205,7 +205,7 @@ impl Daemon {
         let parents = match self.store.unfired_successful_runs() {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("nightjar: after: cannot read unfired successful runs: {e:#}");
+                nightjar_core::log!("after: cannot read unfired successful runs: {e:#}");
                 return;
             }
         };
@@ -224,16 +224,17 @@ impl Daemon {
                 .filter(|c| c.after.as_deref() == Some(&*parent.job))
             {
                 if lost_to_a_restart {
-                    eprintln!(
-                        "nightjar: job {:?}: its trigger from {:?} was lost to a daemon \
+                    nightjar_core::log!(
+                        "job {:?}: its trigger from {:?} was lost to a daemon \
                          restart; recording it missed rather than running it now",
-                        child.name, parent.job
+                        child.name,
+                        parent.job
                     );
                     if let Err(e) =
                         self.record_missed(child, finished_at, Trigger::After(parent.job.clone()))
                     {
-                        eprintln!(
-                            "nightjar: job {:?}: cannot record the lost trigger missed: {e:#}",
+                        nightjar_core::log!(
+                            "job {:?}: cannot record the lost trigger missed: {e:#}",
                             child.name
                         );
                     }
@@ -243,8 +244,8 @@ impl Daemon {
                 let in_flight = match self.store.running_count(&child.name) {
                     Ok(n) => n,
                     Err(e) => {
-                        eprintln!(
-                            "nightjar: job {:?}: cannot check in-flight count: {e:#}",
+                        nightjar_core::log!(
+                            "job {:?}: cannot check in-flight count: {e:#}",
                             child.name
                         );
                         continue;
@@ -253,16 +254,17 @@ impl Daemon {
                 // The same policy a scheduled occurrence follows: being
                 // triggered isn't a license to run concurrently with itself.
                 if !overlap_allows(child.overlap, in_flight) {
-                    eprintln!(
-                        "nightjar: job {:?}: triggered by {:?} but skipped, \
+                    nightjar_core::log!(
+                        "job {:?}: triggered by {:?} but skipped, \
                          {in_flight} run(s) already in flight",
-                        child.name, parent.job
+                        child.name,
+                        parent.job
                     );
                     if let Err(e) =
                         self.record_missed(child, finished_at, Trigger::After(parent.job.clone()))
                     {
-                        eprintln!(
-                            "nightjar: job {:?}: cannot record the skipped trigger: {e:#}",
+                        nightjar_core::log!(
+                            "job {:?}: cannot record the skipped trigger: {e:#}",
                             child.name
                         );
                     }
@@ -271,16 +273,17 @@ impl Daemon {
 
                 let run_id = uuid::Uuid::now_v7().to_string();
                 if let Err(e) = self.spawn_as(child, run_id, Trigger::After(parent.job.clone())) {
-                    eprintln!("nightjar: job {:?}: cannot spawn: {e:#}", child.name);
+                    nightjar_core::log!("job {:?}: cannot spawn: {e:#}", child.name);
                 }
             }
 
             // Last, and unconditional. A parent left unstamped would have
             // every following tick reach the same decision again.
             if let Err(e) = self.store.set_after_fired_at(&parent.id, self.clock.now()) {
-                eprintln!(
-                    "nightjar: job {:?}: cannot mark run {} handled: {e:#}",
-                    parent.job, parent.id
+                nightjar_core::log!(
+                    "job {:?}: cannot mark run {} handled: {e:#}",
+                    parent.job,
+                    parent.id
                 );
             }
         }
@@ -297,10 +300,7 @@ impl Daemon {
             let queued = match self.store.queued_count(&job.name) {
                 Ok(n) => n,
                 Err(e) => {
-                    eprintln!(
-                        "nightjar: queue: job {:?}: cannot check queue: {e:#}",
-                        job.name
-                    );
+                    nightjar_core::log!("queue: job {:?}: cannot check queue: {e:#}", job.name);
                     continue;
                 }
             };
@@ -310,8 +310,8 @@ impl Daemon {
             let in_flight = match self.store.running_count(&job.name) {
                 Ok(n) => n,
                 Err(e) => {
-                    eprintln!(
-                        "nightjar: queue: job {:?}: cannot check in-flight count: {e:#}",
+                    nightjar_core::log!(
+                        "queue: job {:?}: cannot check in-flight count: {e:#}",
                         job.name
                     );
                     continue;
@@ -323,14 +323,14 @@ impl Daemon {
             match self.store.dequeue_oldest(&job.name) {
                 Ok(Some((run_id, _due_at))) => {
                     if let Err(e) = self.spawn_as(job, run_id, Trigger::Schedule) {
-                        eprintln!(
-                            "nightjar: queue: job {:?}: cannot spawn dequeued run: {e:#}",
+                        nightjar_core::log!(
+                            "queue: job {:?}: cannot spawn dequeued run: {e:#}",
                             job.name
                         );
                     }
                 }
                 Ok(None) => {}
-                Err(e) => eprintln!("nightjar: queue: job {:?}: cannot dequeue: {e:#}", job.name),
+                Err(e) => nightjar_core::log!("queue: job {:?}: cannot dequeue: {e:#}", job.name),
             }
         }
     }
@@ -367,8 +367,8 @@ impl Daemon {
             // `running_count` counts rows nobody finished, not live
             // processes. `tick` reconciles every pass, so a row whose
             // process is gone can't reach this branch.
-            eprintln!(
-                "nightjar: job {:?}: skipped, {in_flight} run(s) already in flight",
+            nightjar_core::log!(
+                "job {:?}: skipped, {in_flight} run(s) already in flight",
                 job.name
             );
             self.rearm(job, now)?;
@@ -438,8 +438,8 @@ impl Daemon {
             retired += 1;
         }
         if retired > 0 {
-            eprintln!(
-                "nightjar: job {:?}: recorded {retired} occurrence(s) missed",
+            nightjar_core::log!(
+                "job {:?}: recorded {retired} occurrence(s) missed",
                 job.name
             );
         }
@@ -489,14 +489,14 @@ impl Daemon {
     pub fn run(&mut self) -> Result<()> {
         loop {
             if stop_requested() {
-                eprintln!("nightjar: daemon stopping");
+                nightjar_core::log!("daemon stopping");
                 return Ok(());
             }
             match self.tick() {
                 Ok(fired) => {
                     self.consecutive_failures = 0;
                     for name in fired {
-                        eprintln!("nightjar: started {name}");
+                        nightjar_core::log!("started {name}");
                     }
                     sleep_unless_stopping(self.sleep_for());
                 }
@@ -505,7 +505,7 @@ impl Daemon {
                     // The shift is capped separately so the doubling can't
                     // overflow.
                     self.consecutive_failures = self.consecutive_failures.saturating_add(1);
-                    eprintln!("nightjar: tick failed: {e:#}");
+                    nightjar_core::log!("tick failed: {e:#}");
                     let shift = self.consecutive_failures.min(5);
                     let backoff = (ERROR_BACKOFF * (1u32 << shift)).min(MAX_SLEEP);
                     sleep_unless_stopping(backoff);
@@ -584,7 +584,7 @@ impl Daemon {
                     self.prune_job_now(&job);
                 }
             }
-            Err(e) => eprintln!("nightjar: retention: cannot list jobs: {e:#}"),
+            Err(e) => nightjar_core::log!("retention: cannot list jobs: {e:#}"),
         }
 
         // `Missing` must never mean "no jobs exist". An unreadable or
@@ -613,7 +613,7 @@ impl Daemon {
             .prune_runs(job, self.config.retention_runs, RETENTION_MISSED)
         {
             Ok(orphaned) => self.unlink_orphaned(&orphaned),
-            Err(e) => eprintln!("nightjar: retention: job {job:?}: prune failed: {e:#}"),
+            Err(e) => nightjar_core::log!("retention: job {job:?}: prune failed: {e:#}"),
         }
         // After the keep-counts, not instead of them. The two bounds are
         // independent: a row breaching either one goes.
@@ -621,7 +621,7 @@ impl Daemon {
             match self.store.prune_older_than(job, cutoff) {
                 Ok(orphaned) => self.unlink_orphaned(&orphaned),
                 Err(e) => {
-                    eprintln!("nightjar: retention: job {job:?}: age prune failed: {e:#}");
+                    nightjar_core::log!("retention: job {job:?}: age prune failed: {e:#}");
                 }
             }
         }
@@ -635,7 +635,7 @@ impl Daemon {
         let states = match self.store.all_job_states() {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("nightjar: retention: cannot list job_state: {e:#}");
+                nightjar_core::log!("retention: cannot list job_state: {e:#}");
                 return;
             }
         };
@@ -644,8 +644,8 @@ impl Daemon {
                 continue;
             }
             if let Err(e) = self.store.delete_job_state(&state.job) {
-                eprintln!(
-                    "nightjar: retention: job {:?}: cannot delete job_state: {e:#}",
+                nightjar_core::log!(
+                    "retention: job {:?}: cannot delete job_state: {e:#}",
                     state.job
                 );
             }
@@ -661,8 +661,8 @@ impl Daemon {
                 // A path from the database is data, not a constant this
                 // binary controls. A corrupted or hand-edited row must not
                 // turn retention into a delete-anything primitive.
-                eprintln!(
-                    "nightjar: retention: refusing to remove {} — outside the runs directory",
+                nightjar_core::log!(
+                    "retention: refusing to remove {} — outside the runs directory",
                     path.display()
                 );
                 continue;
@@ -671,7 +671,7 @@ impl Daemon {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => {
-                    eprintln!("nightjar: retention: cannot remove {}: {e}", path.display());
+                    nightjar_core::log!("retention: cannot remove {}: {e}", path.display());
                 }
             }
         }
@@ -739,8 +739,8 @@ impl Daemon {
             let state = match self.store.job_state(&job.name) {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!(
-                        "nightjar: job {:?}: cannot read state for overdue check: {e:#}",
+                    nightjar_core::log!(
+                        "job {:?}: cannot read state for overdue check: {e:#}",
                         job.name
                     );
                     continue;
@@ -749,8 +749,8 @@ impl Daemon {
             let last = match self.store.last_run(&job.name) {
                 Ok(l) => l,
                 Err(e) => {
-                    eprintln!(
-                        "nightjar: job {:?}: cannot read last run for overdue check: {e:#}",
+                    nightjar_core::log!(
+                        "job {:?}: cannot read last run for overdue check: {e:#}",
                         job.name
                     );
                     continue;
@@ -795,8 +795,8 @@ impl Daemon {
         let notified_recently = match self.store.last_overdue_alert_at(&job.name) {
             Ok(last) => !cooldown_expired(last, now),
             Err(e) => {
-                eprintln!(
-                    "nightjar: job {:?}: cannot read overdue alert cooldown: {e:#}",
+                nightjar_core::log!(
+                    "job {:?}: cannot read overdue alert cooldown: {e:#}",
                     job.name
                 );
                 false
@@ -850,9 +850,10 @@ impl Daemon {
             let outcomes = notifier.send(&alert, &on_failure, &[]);
             for outcome in &outcomes {
                 if let Err(e) = &outcome.result {
-                    eprintln!(
-                        "nightjar: {} overdue alert failed for job {:?}: {e:#}",
-                        outcome.channel, job_name
+                    nightjar_core::log!(
+                        "{} overdue alert failed for job {:?}: {e:#}",
+                        outcome.channel,
+                        job_name
                     );
                 }
             }
@@ -861,8 +862,8 @@ impl Daemon {
                     Ok(store) => {
                         let _ = store.set_last_overdue_alert_at(&job_name, now);
                     }
-                    Err(e) => eprintln!(
-                        "nightjar: job {job_name:?}: cannot record overdue alert cooldown: {e:#}"
+                    Err(e) => nightjar_core::log!(
+                        "job {job_name:?}: cannot record overdue alert cooldown: {e:#}"
                     ),
                 }
             }

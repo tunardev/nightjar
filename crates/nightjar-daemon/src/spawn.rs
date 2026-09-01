@@ -82,9 +82,10 @@ impl Daemon {
             match finished {
                 Ok(None) => unfinished.push(spawned),
                 Ok(Some(status)) => self.report_exec_exit(&spawned, status),
-                Err(e) => eprintln!(
-                    "nightjar: job {:?}: cannot reap run {}: {e}",
-                    spawned.job, spawned.run_id
+                Err(e) => nightjar_core::log!(
+                    "job {:?}: cannot reap run {}: {e}",
+                    spawned.job,
+                    spawned.run_id
                 ),
             }
         }
@@ -119,10 +120,11 @@ impl Daemon {
                 return;
             }
             Ok(Some(_)) => {
-                eprintln!(
-                    "nightjar: job {:?}: exec exited {status} without finishing run {} \
+                nightjar_core::log!(
+                    "job {:?}: exec exited {status} without finishing run {} \
                      — recording it unknown",
-                    spawned.job, spawned.run_id
+                    spawned.job,
+                    spawned.run_id
                 );
                 self.finish_unknown(
                     &spawned.run_id,
@@ -130,26 +132,29 @@ impl Daemon {
                 )
             }
             Ok(None) => {
-                eprintln!(
-                    "nightjar: job {:?}: exec exited {status} without recording run {} \
+                nightjar_core::log!(
+                    "job {:?}: exec exited {status} without recording run {} \
                      — the run did not reach the store; recording it unknown",
-                    spawned.job, spawned.run_id
+                    spawned.job,
+                    spawned.run_id
                 );
                 self.record_unstarted(spawned, status)
             }
             Err(e) => {
-                eprintln!(
-                    "nightjar: job {:?}: cannot check run {}: {e:#}",
-                    spawned.job, spawned.run_id
+                nightjar_core::log!(
+                    "job {:?}: cannot check run {}: {e:#}",
+                    spawned.job,
+                    spawned.run_id
                 );
                 return;
             }
         };
         match &outcome {
             Ok(_) => self.prune_job_now(&spawned.job),
-            Err(e) => eprintln!(
-                "nightjar: job {:?}: cannot record run {} as unknown: {e:#}",
-                spawned.job, spawned.run_id
+            Err(e) => nightjar_core::log!(
+                "job {:?}: cannot record run {} as unknown: {e:#}",
+                spawned.job,
+                spawned.run_id
             ),
         }
     }

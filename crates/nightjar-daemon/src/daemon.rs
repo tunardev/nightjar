@@ -106,12 +106,12 @@ impl Daemon {
         // it can race the first on anything, including the store.
         let lock = acquire_lock(&paths.lock_path)?;
         let store = Store::open(&paths.db_path)?;
-        eprintln!("nightjar: daemon started (pid {})", std::process::id());
+        nightjar_core::log!("daemon started (pid {})", std::process::id());
         // `TimeZone::system()` silently falls back to UTC if it can't
         // resolve a zone (no tzdata, a broken /etc/localtime). Printing it
         // gives a 2am backup that runs at 9pm a visible cause.
-        eprintln!(
-            "nightjar: scheduling in {}",
+        nightjar_core::log!(
+            "scheduling in {}",
             tz.iana_name().unwrap_or("an unnamed fixed-offset zone")
         );
         let startup = clock.now();

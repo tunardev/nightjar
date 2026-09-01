@@ -121,8 +121,8 @@ pub fn send_and_stamp_cooldown(
     let outcomes = notifier.send(alert, on_failure, redact);
     for outcome in &outcomes {
         if let Err(e) = &outcome.result {
-            eprintln!(
-                "nightjar: {} alert failed for job {:?}: {e:#}",
+            nightjar_core::log!(
+                "{} alert failed for job {:?}: {e:#}",
                 outcome.channel,
                 alert.job()
             );
@@ -153,7 +153,7 @@ impl Notifier for DetachedNotifier {
         if on_failure.has_channel()
             && let Err(e) = spawn_detached(alert, on_failure)
         {
-            eprintln!("nightjar: could not start detached notifier: {e:#}");
+            nightjar_core::log!("could not start detached notifier: {e:#}");
         }
         Vec::new()
     }
@@ -236,8 +236,8 @@ fn spawn_detached(alert: &Alert, on_failure: &OnFailure) -> Result<()> {
             cmd.stdout(log).stderr(stderr_log);
         }
         Err(e) => {
-            eprintln!(
-                "nightjar: could not open notify.log, discarding the detached notifier's own output: {e:#}"
+            nightjar_core::log!(
+                "could not open notify.log, discarding the detached notifier's own output: {e:#}"
             );
             cmd.stdout(Stdio::null()).stderr(Stdio::null());
         }

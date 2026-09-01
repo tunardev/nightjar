@@ -50,7 +50,7 @@ impl Daemon {
             }
         }
         if reconciled > 0 {
-            eprintln!("nightjar: reconciled {reconciled} stale run(s) as unknown");
+            nightjar_core::log!("reconciled {reconciled} stale run(s) as unknown");
         }
         Ok(reconciled)
     }
@@ -165,10 +165,7 @@ impl Daemon {
         // same occurrence again later in this tick.
         for job in live {
             if let Err(e) = self.rearm(job, now) {
-                eprintln!(
-                    "nightjar: job {:?}: cannot re-arm after catch-up: {e:#}",
-                    job.name
-                );
+                nightjar_core::log!("job {:?}: cannot re-arm after catch-up: {e:#}", job.name);
             }
         }
 
@@ -180,7 +177,7 @@ impl Daemon {
             match self.spawn_make_up_runs(job, held) {
                 Ok(n) if n > 0 => fired.push(job.name.clone()),
                 Ok(_) => {}
-                Err(e) => eprintln!("nightjar: {e:#}"),
+                Err(e) => nightjar_core::log!("{e:#}"),
             }
         }
 
@@ -258,10 +255,7 @@ impl Daemon {
         }
 
         if missed > 0 {
-            eprintln!(
-                "nightjar: job {:?}: catch-up recorded {missed} missed",
-                job.name
-            );
+            nightjar_core::log!("job {:?}: catch-up recorded {missed} missed", job.name);
         }
 
         // At most `budget` rows. The streaming walk above is the only
@@ -284,8 +278,8 @@ impl Daemon {
             let Err(e) = self.spawn_as(job, run_id.clone(), Trigger::Catchup) else {
                 continue;
             };
-            eprintln!(
-                "nightjar: job {:?}: catch-up spawned {started}, then failed; the remaining {} \
+            nightjar_core::log!(
+                "job {:?}: catch-up spawned {started}, then failed; the remaining {} \
                  occurrence(s) stay missed: {e:#}",
                 job.name,
                 held.len() - started
@@ -293,11 +287,7 @@ impl Daemon {
             return Err(e).with_context(|| format!("catch-up spawn for job {:?}", job.name));
         }
         if !held.is_empty() {
-            eprintln!(
-                "nightjar: job {:?}: catch-up spawned {}",
-                job.name,
-                held.len()
-            );
+            nightjar_core::log!("job {:?}: catch-up spawned {}", job.name, held.len());
         }
         Ok(held.len())
     }

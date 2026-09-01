@@ -11,6 +11,27 @@ pub fn error_summary(e: &anyhow::Error) -> String {
         .to_string()
 }
 
+/// One timestamped `nightjar:` line on stderr. For processes whose stderr
+/// is a log file: launchd's `StandardErrorPath` and systemd's `append:`
+/// add no timestamps of their own, and a bare "tick failed" line is
+/// useless without one.
+pub fn log_line(args: std::fmt::Arguments<'_>) {
+    eprintln!("{} nightjar: {args}", log_timestamp(&jiff::Zoned::now()));
+}
+
+/// RFC 3339 with the local offset, so a line can be matched against the
+/// job's own schedule without converting from UTC first.
+fn log_timestamp(at: &jiff::Zoned) -> String {
+    at.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string()
+}
+
+#[macro_export]
+macro_rules! log {
+    ($($arg:tt)*) => {
+        $crate::format::log_line(format_args!($($arg)*))
+    };
+}
+
 pub fn relative_time(then: Timestamp, now: Timestamp) -> String {
     let secs = (now.as_second() - then.as_second()).max(0);
     match secs {
@@ -74,6 +95,12 @@ mod tests {
 
     fn ts(s: &str) -> Timestamp {
         s.parse().unwrap()
+    }
+
+    #[test]
+    fn log_timestamp_is_rfc3339_with_a_local_offset() {
+        let at = ts("2026-08-23T12:34:56Z").to_zoned(jiff::tz::TimeZone::get("Asia/Baku").unwrap());
+        assert_eq!(log_timestamp(&at), "2026-08-23T16:34:56+04:00");
     }
 
     #[test]
