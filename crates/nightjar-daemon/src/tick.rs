@@ -82,6 +82,13 @@ impl Daemon {
             .filter(|j| j.enabled)
             .collect();
 
+        for warning in newly_seen(
+            &mut self.logged_warnings,
+            live.iter().flat_map(|j| j.warnings.iter()),
+        ) {
+            eprintln!("nightjar: {warning}");
+        }
+
         let live_names: std::collections::HashSet<&str> =
             live.iter().map(|j| j.name.as_str()).collect();
         self.next_run_at
@@ -508,6 +515,20 @@ impl Daemon {
     }
 }
 
+/// Returns the entries of `current` not in `seen`, then replaces `seen`
+/// with `current`. An entry that disappears and later returns is reported
+/// again: the condition it describes really did recur.
+fn newly_seen<'a>(
+    seen: &mut HashSet<String>,
+    current: impl Iterator<Item = &'a String>,
+) -> Vec<String> {
+    let current: HashSet<String> = current.cloned().collect();
+    let mut fresh: Vec<String> = current.difference(seen).cloned().collect();
+    fresh.sort();
+    *seen = current;
+    fresh
+}
+
 /// Whether a new run of a job may start, given how many are already in
 /// flight. Shared by `evaluate` and `nightjar run`, so a manual invocation
 /// can't start a second instance a `skip` or `queue` schedule would have
@@ -846,6 +867,35 @@ impl Daemon {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod newly_seen_tests {
+    use super::newly_seen;
+    use std::collections::HashSet;
+
+    #[test]
+    fn a_warning_is_reported_once_until_it_goes_away_and_returns() {
+        let mut seen = HashSet::new();
+        let w = ["b: parent disabled".to_string()];
+
+        assert_eq!(newly_seen(&mut seen, w.iter()), w);
+        assert!(
+            newly_seen(&mut seen, w.iter()).is_empty(),
+            "same tick again"
+        );
+        assert!(newly_seen(&mut seen, [].iter()).is_empty(), "resolved");
+        assert_eq!(newly_seen(&mut seen, w.iter()), w, "recurred");
+    }
+
+    #[test]
+    fn only_the_new_entries_are_reported_when_the_set_grows() {
+        let mut seen = HashSet::new();
+        let first = ["one".to_string()];
+        let both = ["one".to_string(), "two".to_string()];
+        newly_seen(&mut seen, first.iter());
+        assert_eq!(newly_seen(&mut seen, both.iter()), ["two".to_string()]);
     }
 }
 

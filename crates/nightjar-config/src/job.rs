@@ -126,6 +126,11 @@ pub struct Job {
     pub secrets: BTreeMap<String, String>,
     pub on_failure: OnFailure,
     pub limits: Limits,
+    /// Loaded fine, but worth telling the user about: today, an `after`
+    /// parent that is disabled. Kept as data so every caller decides
+    /// where it goes. A library printing to stderr would corrupt the TUI
+    /// and repeat itself on every daemon tick.
+    pub warnings: Vec<String>,
 }
 
 pub fn parse_duration(s: &str) -> Result<Duration> {
@@ -270,6 +275,7 @@ fn validate_after_graph(entries: &mut [(String, Result<Job>)]) {
 
     let names: Vec<String> = entries.iter().map(|(n, _)| n.clone()).collect();
     let mut errors: Vec<(String, String)> = Vec::new();
+    let mut warnings: Vec<(String, String)> = Vec::new();
 
     for name in &names {
         let Some(Ok(job)) = entries.iter().find(|(n, _)| n == name).map(|(_, r)| r) else {
@@ -292,10 +298,13 @@ fn validate_after_graph(entries: &mut [(String, Result<Job>)]) {
             .and_then(|(_, r)| r.as_ref().ok())
             .is_some_and(|p| p.enabled)
         {
-            eprintln!(
-                "nightjar: job {name:?}: after names {parent:?}, which is disabled — \
-                 {name:?} will never fire until it is re-enabled"
-            );
+            warnings.push((
+                name.clone(),
+                format!(
+                    "job {name:?}: after names {parent:?}, which is disabled — \
+                     {name:?} will never fire until it is re-enabled"
+                ),
+            ));
         }
 
         // `chain` never includes the scheduled root. Pushing it would
@@ -343,6 +352,11 @@ fn validate_after_graph(entries: &mut [(String, Result<Job>)]) {
     for (name, message) in errors {
         if let Some(entry) = entries.iter_mut().find(|(n, _)| n == &name) {
             entry.1 = Err(anyhow::anyhow!(message));
+        }
+    }
+    for (name, message) in warnings {
+        if let Some((_, Ok(job))) = entries.iter_mut().find(|(n, _)| n == &name) {
+            job.warnings.push(message);
         }
     }
 }
@@ -416,6 +430,7 @@ impl Job {
             secrets: raw.secrets,
             on_failure: raw.on_failure,
             limits,
+            warnings: Vec::new(),
         })
     }
 
@@ -941,11 +956,35 @@ webook = "https://example.com/hook"
         write(tmp.path(), "b", "command = \"true\"\nafter = [\"a\"]\n");
         let loaded = Job::load_all(tmp.path());
         let b = &loaded.iter().find(|(n, _)| n == "b").unwrap().1;
+        let b = b
+            .as_ref()
+            .unwrap_or_else(|e| panic!("a disabled parent is a warning, not a load error: {e}"));
+        assert_eq!(b.warnings.len(), 1, "got: {:?}", b.warnings);
         assert!(
-            b.is_ok(),
-            "a disabled parent is a warning, not a load error: {:?}",
-            b.as_ref().err()
+            b.warnings[0].contains("disabled") && b.warnings[0].contains("\"a\""),
+            "the warning must name the disabled parent: {}",
+            b.warnings[0]
         );
+
+        let a = &loaded.iter().find(|(n, _)| n == "a").unwrap().1;
+        assert!(
+            a.as_ref().unwrap().warnings.is_empty(),
+            "the warning belongs to the child, not the parent"
+        );
+    }
+
+    #[test]
+    fn job_carries_no_warnings_when_nothing_is_worth_saying() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "a",
+            "command = \"true\"\nschedule = \"hourly\"\n",
+        );
+        write(tmp.path(), "b", "command = \"true\"\nafter = [\"a\"]\n");
+        for (name, job) in Job::load_all(tmp.path()) {
+            assert!(job.unwrap().warnings.is_empty(), "job {name}");
+        }
     }
 
     #[test]

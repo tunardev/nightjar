@@ -664,6 +664,7 @@ mod tests {
             env: std::collections::BTreeMap::new(),
             secrets: std::collections::BTreeMap::new(),
             on_failure: OnFailure::default(),
+            warnings: Vec::new(),
         }
     }
 

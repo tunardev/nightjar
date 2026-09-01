@@ -199,8 +199,22 @@ fn check_jobs(jobs_dir: &Path) -> Check {
                         .map(|e| format!("{name}: {}", error_summary(e)))
                 })
                 .collect();
-            if bad.is_empty() {
+            let warnings: Vec<&str> = loaded
+                .iter()
+                .filter_map(|(_, r)| r.as_ref().ok())
+                .flat_map(|j| j.warnings.iter().map(String::as_str))
+                .collect();
+            if bad.is_empty() && warnings.is_empty() {
                 Check::pass("jobs", format!("{} job(s), all parse", loaded.len()))
+            } else if bad.is_empty() {
+                Check::warn(
+                    "jobs",
+                    format!(
+                        "{} job(s), all parse, but: {}",
+                        loaded.len(),
+                        warnings.join("; ")
+                    ),
+                )
             } else {
                 Check::fail(
                     "jobs",
@@ -434,6 +448,38 @@ mod tests {
     fn check_daemon_fails_when_heartbeat_is_stale() {
         let c = check_daemon(&Ok(Some((beat(42), true))), ts("2026-06-01T00:00:00Z"));
         assert_eq!(c.status, Status::Fail);
+    }
+
+    #[test]
+    fn check_jobs_warns_and_names_the_disabled_parent_when_a_child_can_never_fire() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("a.toml"),
+            "command = \"true\"\nschedule = \"hourly\"\nenabled = false\n",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join("b.toml"),
+            "command = \"true\"\nafter = [\"a\"]\n",
+        )
+        .unwrap();
+
+        let c = check_jobs(tmp.path());
+        assert_eq!(c.status, Status::Warn);
+        assert!(c.message.contains("disabled"), "got: {}", c.message);
+        assert!(c.message.contains("\"a\""), "got: {}", c.message);
+    }
+
+    #[test]
+    fn check_jobs_passes_cleanly_when_every_job_parses_without_warnings() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("a.toml"),
+            "command = \"true\"\nschedule = \"hourly\"\n",
+        )
+        .unwrap();
+        let c = check_jobs(tmp.path());
+        assert_eq!(c.status, Status::Pass);
     }
 
     #[test]

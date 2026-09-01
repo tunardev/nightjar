@@ -41,6 +41,11 @@ pub struct Daemon {
     /// that found no gap, or one whose catch-up committed. Until then, any
     /// elapsed time is unaccounted for. See `ordinary_tick_ceiling`.
     pub(crate) has_watched_the_clock: bool,
+    /// Job-file warnings already logged. `Job::load_all` runs every tick
+    /// and returns the same warning each time; this is what keeps the
+    /// log to one line per warning, re-logged only if it goes away and
+    /// comes back.
+    pub(crate) logged_warnings: HashSet<String>,
     _lock: DaemonLock,
     pub(crate) config: Config,
 }
@@ -124,6 +129,7 @@ impl Daemon {
             last_sweep: None,
             started_at: startup,
             has_watched_the_clock: false,
+            logged_warnings: HashSet::new(),
             _lock: lock,
             config,
             paths,

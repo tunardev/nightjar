@@ -430,6 +430,7 @@ mod next_column_tests {
             env: BTreeMap::new(),
             secrets: BTreeMap::new(),
             on_failure: OnFailure::default(),
+            warnings: Vec::new(),
         }
     }
 
