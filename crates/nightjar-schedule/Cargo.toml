@@ -1,0 +1,19 @@
+[package]
+name = "nightjar-schedule"
+description.workspace = true
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+jiff.workspace = true
+jiff-cron.workspace = true
