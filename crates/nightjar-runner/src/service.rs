@@ -93,10 +93,10 @@ pub fn install_root_from(
     xdg_config_home: Option<&OsStr>,
     home: Option<&OsStr>,
 ) -> Result<PathBuf> {
-    if let Some(root) = override_root {
-        if !root.is_empty() {
-            return Ok(PathBuf::from(root));
-        }
+    if let Some(root) = override_root
+        && !root.is_empty()
+    {
+        return Ok(PathBuf::from(root));
     }
 
     if cfg!(target_os = "macos") {

@@ -6,7 +6,7 @@ resolver = "3"
 version = "0.1.0"
 description = "cron that tells you what happened"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/tunardev/nightjar"
 authors = []
@@ -33,8 +33,8 @@ jiff = "0.2"
 jiff-cron = "0.3"
 libc = "0.2"
 owo-colors = { version = "4", features = ["supports-colors"] }
-ratatui = "0.29.0"
-rusqlite = { version = "0.32", features = ["bundled"] }
+ratatui = "0.30.2"
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 # preserve_order: `--json` output is documented by example, and readers
 # diff it; key order must not depend on which crate rendered it.
@@ -42,8 +42,8 @@ serde_json = { version = "1", features = ["preserve_order"] }
 signal-hook = "0.4.4"
 subtle = "2.6"
 tiny_http = { version = "0.12", default-features = false }
-toml = "0.8"
-toml_edit = "0.22"
+toml = "1.1"
+toml_edit = "0.25"
 ureq = "3"
 uuid = { version = "1", features = ["v7"] }
 zeroize = "1"
@@ -60,3 +60,5 @@ must_use_candidate = "allow"
 
 [profile.release]
 strip = true
+lto = true
+codegen-units = 1

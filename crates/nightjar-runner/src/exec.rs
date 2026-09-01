@@ -538,24 +538,24 @@ fn wait_for_run(
     let mut give_up: Option<Instant> = None;
 
     loop {
-        if exit.is_none() {
-            if let Some(exited) = child.try_wait()? {
-                exit = Some((exited.code(), cpu_limit_killed(exited), clock.now()));
-                give_up = Instant::now().checked_add(PUMP_DRAIN);
-            }
+        if exit.is_none()
+            && let Some(exited) = child.try_wait()?
+        {
+            exit = Some((exited.code(), cpu_limit_killed(exited), clock.now()));
+            give_up = Instant::now().checked_add(PUMP_DRAIN);
         }
         let drained = pumps.finished();
 
-        if let Some((code, hit_cpu_limit, exited_at)) = exit {
-            if drained || give_up.is_some_and(|t| Instant::now() >= t) {
-                pumps.finalize_with_fallback();
-                let status = match (code, hit_cpu_limit) {
-                    (_, true) => RunStatus::Limit,
-                    (Some(0), _) => RunStatus::Success,
-                    _ => RunStatus::Failure,
-                };
-                return Ok((code, status, exited_at, None));
-            }
+        if let Some((code, hit_cpu_limit, exited_at)) = exit
+            && (drained || give_up.is_some_and(|t| Instant::now() >= t))
+        {
+            pumps.finalize_with_fallback();
+            let status = match (code, hit_cpu_limit) {
+                (_, true) => RunStatus::Limit,
+                (Some(0), _) => RunStatus::Success,
+                _ => RunStatus::Failure,
+            };
+            return Ok((code, status, exited_at, None));
         }
 
         if deadline.is_some_and(|t| Instant::now() >= t) {
@@ -610,10 +610,10 @@ fn escalate(
         .checked_add(GRACE)
         .context("kill grace period is too large to represent as a deadline")?;
     loop {
-        if code.is_none() {
-            if let Some(exited) = child.try_wait()? {
-                code = Some(exited.code());
-            }
+        if code.is_none()
+            && let Some(exited) = child.try_wait()?
+        {
+            code = Some(exited.code());
         }
         if code.is_some() && pumps.finished() {
             return Ok((code.flatten(), status_on_stop, clock.now(), caught_signal));
@@ -1681,11 +1681,10 @@ mod tests {
                     if let Ok(out) = std::process::Command::new("ps")
                         .args(["-axww", "-o", "command="])
                         .output()
+                        && String::from_utf8_lossy(&out.stdout).contains(&secret)
                     {
-                        if String::from_utf8_lossy(&out.stdout).contains(&secret) {
-                            leaked = true;
-                            break;
-                        }
+                        leaked = true;
+                        break;
                     }
                     std::thread::sleep(Duration::from_millis(50));
                 }

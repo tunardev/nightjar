@@ -150,10 +150,10 @@ impl Notifier for DetachedNotifier {
         on_failure: &OnFailure,
         _redact: &[SecretValue],
     ) -> Vec<NotifyOutcome> {
-        if on_failure.has_channel() {
-            if let Err(e) = spawn_detached(alert, on_failure) {
-                eprintln!("nightjar: could not start detached notifier: {e:#}");
-            }
+        if on_failure.has_channel()
+            && let Err(e) = spawn_detached(alert, on_failure)
+        {
+            eprintln!("nightjar: could not start detached notifier: {e:#}");
         }
         Vec::new()
     }
@@ -341,11 +341,11 @@ fn run_with_timeout(
                 .try_wait()
                 .with_context(|| format!("waiting for {label}"))?;
         }
-        if let Some(status) = exited {
-            if group_is_empty(pid) {
-                guard.mark_done();
-                return exit_result(status, label);
-            }
+        if let Some(status) = exited
+            && group_is_empty(pid)
+        {
+            guard.mark_done();
+            return exit_result(status, label);
         }
         if Instant::now() >= deadline {
             let result = escalate(guard.child, pid, grace, label);

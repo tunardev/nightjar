@@ -68,48 +68,45 @@ fn run<T: term::RawTerminal>(
             Duration::from_secs(2)
         };
 
-        if event::poll(poll_for)? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    dirty = true;
-                    match app.on_key(key) {
-                        app::Action::Quit => return Ok(0),
-                        app::Action::RunNow { job } => match actions::run_now(paths, &job) {
-                            Ok(child) => {
-                                spawned.push(child);
-                                app.set_status(format!("{job}: started"));
-                            }
-                            Err(e) => app.set_status(format!("{job}: {e:#}")),
-                        },
-                        app::Action::Edit { job } => {
-                            let outcome = actions::suspend_and_edit(guard, || actions::edit(&job));
-                            terminal.clear()?;
-                            // A filesystem write, not a database write. `data_version`
-                            // would not see it. Reload unconditionally here.
-                            app.update_state(load_state(&store, paths, &clock)?);
-                            last_data_version = data_version(&store)?;
-                            if let Err(e) = outcome {
-                                app.set_status(format!("{job}: {e:#}"));
-                            }
-                        }
-                        app::Action::ToggleEnabled { job } => {
-                            match actions::toggle_enabled(paths, &job) {
-                                Ok(now_enabled) => app.set_status(format!(
-                                    "{job}: {}",
-                                    if now_enabled { "enabled" } else { "disabled" }
-                                )),
-                                Err(e) => app.set_status(format!("{job}: {e:#}")),
-                            }
-                        }
-                        app::Action::Kill { pid, .. } => {
-                            if let Err(e) = actions::kill_run(pid) {
-                                app.set_status(format!("kill failed: {e:#}"));
-                            }
-                        }
-                        app::Action::JumpToSearchMatch => jump_to_search_match(&mut app),
-                        app::Action::None => {}
+        if event::poll(poll_for)?
+            && let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            dirty = true;
+            match app.on_key(key) {
+                app::Action::Quit => return Ok(0),
+                app::Action::RunNow { job } => match actions::run_now(paths, &job) {
+                    Ok(child) => {
+                        spawned.push(child);
+                        app.set_status(format!("{job}: started"));
+                    }
+                    Err(e) => app.set_status(format!("{job}: {e:#}")),
+                },
+                app::Action::Edit { job } => {
+                    let outcome = actions::suspend_and_edit(guard, || actions::edit(&job));
+                    terminal.clear()?;
+                    // A filesystem write, not a database write. `data_version`
+                    // would not see it. Reload unconditionally here.
+                    app.update_state(load_state(&store, paths, &clock)?);
+                    last_data_version = data_version(&store)?;
+                    if let Err(e) = outcome {
+                        app.set_status(format!("{job}: {e:#}"));
                     }
                 }
+                app::Action::ToggleEnabled { job } => match actions::toggle_enabled(paths, &job) {
+                    Ok(now_enabled) => app.set_status(format!(
+                        "{job}: {}",
+                        if now_enabled { "enabled" } else { "disabled" }
+                    )),
+                    Err(e) => app.set_status(format!("{job}: {e:#}")),
+                },
+                app::Action::Kill { pid, .. } => {
+                    if let Err(e) = actions::kill_run(pid) {
+                        app.set_status(format!("kill failed: {e:#}"));
+                    }
+                }
+                app::Action::JumpToSearchMatch => jump_to_search_match(&mut app),
+                app::Action::None => {}
             }
         }
 

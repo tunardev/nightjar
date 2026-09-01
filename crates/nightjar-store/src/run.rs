@@ -103,6 +103,16 @@ pub(crate) fn from_ms(v: i64) -> Result<Timestamp> {
     Ok(Timestamp::from_millisecond(v)?)
 }
 
+/// `SQLite` integers are signed 64-bit. A byte count past `i64::MAX` is
+/// not a real capture, so saturating is honest enough.
+fn bytes_to_sql(n: u64) -> i64 {
+    i64::try_from(n).unwrap_or(i64::MAX)
+}
+
+fn bytes_from_sql(n: i64) -> u64 {
+    u64::try_from(n).unwrap_or(0)
+}
+
 /// A row retention may delete: any that isn't a success still waiting for
 /// `Daemon::fire_after_triggers` to stamp it. See `prune_runs`.
 const AFTER_HANDLED: &str = "NOT (status = 'success' AND after_fired_at IS NULL)";
@@ -245,7 +255,7 @@ impl Store {
                 exit_code,
                 duration,
                 status.as_str(),
-                output_bytes
+                bytes_to_sql(output_bytes)
             ],
         )?;
         if affected == 0 {
@@ -285,7 +295,13 @@ impl Store {
                     duration_ms = MAX(?2 - started_at, 0),
                     status = ?4, output_bytes = ?5
               WHERE id = ?1 AND finished_at IS NULL",
-            rusqlite::params![id, ms(finished), exit_code, status.as_str(), output_bytes],
+            rusqlite::params![
+                id,
+                ms(finished),
+                exit_code,
+                status.as_str(),
+                bytes_to_sql(output_bytes)
+            ],
         )?;
         Ok(affected > 0)
     }
@@ -534,7 +550,7 @@ fn row_to_run(row: &rusqlite::Row) -> rusqlite::Result<Result<Run>> {
     let started: i64 = row.get(3)?;
     let stdout: Option<String> = row.get(9)?;
     let stderr: Option<String> = row.get(10)?;
-    let bytes: u64 = row.get(11)?;
+    let bytes: i64 = row.get(11)?;
     let pid: Option<u32> = row.get(8)?;
     let message: Option<String> = row.get(12)?;
 
@@ -551,7 +567,7 @@ fn row_to_run(row: &rusqlite::Row) -> rusqlite::Result<Result<Run>> {
             pid,
             stdout_path: stdout.map(PathBuf::from),
             stderr_path: stderr.map(PathBuf::from),
-            output_bytes: bytes,
+            output_bytes: bytes_from_sql(bytes),
             message,
         })
     })())

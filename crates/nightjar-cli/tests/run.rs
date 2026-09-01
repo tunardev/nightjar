@@ -307,10 +307,10 @@ fn second_stop_signal_cuts_grace_period_short() {
             .ok()
             .and_then(|s| s.last_run(job).ok().flatten())
             .map(|r| r.status);
-        if let Some(status) = status {
-            if status != nightjar_cli::store::run::RunStatus::Running {
-                break status;
-            }
+        if let Some(status) = status
+            && status != nightjar_cli::store::run::RunStatus::Running
+        {
+            break status;
         }
         assert!(
             Instant::now() < deadline,
@@ -377,10 +377,10 @@ fn assert_run_survives_signal(job: &str, signal: libc::c_int) {
             .ok()
             .and_then(|s| s.last_run(job).ok().flatten())
             .map(|r| r.status);
-        if let Some(status) = status {
-            if status != nightjar_cli::store::run::RunStatus::Running {
-                break status;
-            }
+        if let Some(status) = status
+            && status != nightjar_cli::store::run::RunStatus::Running
+        {
+            break status;
         }
         assert!(
             Instant::now() < deadline,

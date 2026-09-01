@@ -97,9 +97,9 @@ pub fn cmd_edit(name: &str) -> Result<i32> {
 
     let status = editor_command(&editor, &scratch.0)
         .status()
-        .with_context(|| format!("running {editor:?} on {}", scratch.0.display()))?;
+        .with_context(|| format!("running {} on {}", editor.display(), scratch.0.display()))?;
     if !status.success() {
-        bail!("{editor:?} exited with {status}");
+        bail!("{} exited with {status}", editor.display());
     }
 
     let edited = std::fs::read_to_string(&scratch.0)

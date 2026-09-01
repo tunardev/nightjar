@@ -33,19 +33,19 @@ impl Paths {
         home: Option<&OsStr>,
         cwd: &Path,
     ) -> Result<Self> {
-        if let Some(root) = nightjar_home {
-            if !root.is_empty() {
-                let p = Path::new(root);
-                // A relative `runs_dir` would defeat `is_within_runs_dir`'s
-                // containment check and silently disable retention. Anchor to
-                // `cwd`, not the XDG default, so this still works here.
-                let root = if p.is_absolute() {
-                    p.to_path_buf()
-                } else {
-                    cwd.join(p)
-                };
-                return Ok(Self::for_root(&root));
-            }
+        if let Some(root) = nightjar_home
+            && !root.is_empty()
+        {
+            let p = Path::new(root);
+            // A relative `runs_dir` would defeat `is_within_runs_dir`'s
+            // containment check and silently disable retention. Anchor to
+            // `cwd`, not the XDG default, so this still works here.
+            let root = if p.is_absolute() {
+                p.to_path_buf()
+            } else {
+                cwd.join(p)
+            };
+            return Ok(Self::for_root(&root));
         }
 
         let home_path = home.filter(|h| !h.is_empty()).context("HOME is not set")?;

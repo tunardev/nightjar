@@ -377,15 +377,15 @@ pub fn check_bind(bind: SocketAddr, token: Option<&str>) -> Result<()> {
             port = bind.port(),
         );
     }
-    if let Some(token) = token {
-        if token.len() < MIN_TOKEN_LEN {
-            bail!(
-                "--token is {} characters, which is not enough to resist guessing from \
-                 another account on this machine; use at least {MIN_TOKEN_LEN} \
-                 (e.g. `openssl rand -hex 32`)",
-                token.len(),
-            );
-        }
+    if let Some(token) = token
+        && token.len() < MIN_TOKEN_LEN
+    {
+        bail!(
+            "--token is {} characters, which is not enough to resist guessing from \
+             another account on this machine; use at least {MIN_TOKEN_LEN} \
+             (e.g. `openssl rand -hex 32`)",
+            token.len(),
+        );
     }
     Ok(())
 }
@@ -451,10 +451,10 @@ fn dispatch_route(
     token: Option<&str>,
     request: &Request,
 ) -> ResponseBox {
-    if let Some(expected) = token {
-        if !authorized(request, expected) {
-            return unauthorized();
-        }
+    if let Some(expected) = token
+        && !authorized(request, expected)
+    {
+        return unauthorized();
     }
 
     let path = path_without_query(request);

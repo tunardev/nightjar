@@ -13,11 +13,9 @@ targets = [
 ]
 
 [advisories]
-ignore = [
-    # ratatui's transitive dep, no alternative available; unmaintained, not
-    # a vulnerability. Revisit if ratatui drops it or a CVE lands on top.
-    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained but not vulnerable; pulled in by ratatui" },
-]
+# Nothing ignored. Every advisory `cargo deny` reports must be resolved by
+# an upgrade or by adding an entry here with a reason, never by silence.
+ignore = []
 
 [licenses]
 # The exact set actually present in Cargo.lock for the targets above — not a
@@ -39,9 +37,10 @@ allow = [
 ]
 
 [bans]
-# Informational: two crates each carrying two semver-incompatible versions
-# (windows-sys, winnow) via unrelated dependency chains. Nothing to fix on
-# our side; denying here would just make routine dependency bumps flaky.
+# Informational: a handful of transitive crates (hashbrown, signal-hook,
+# supports-color, syn, getrandom) arrive in two semver-incompatible
+# versions via unrelated dependency chains. Nothing to fix on our side;
+# denying here would just make routine dependency bumps flaky.
 multiple-versions = "warn"
 # This project pins every dependency to a real version in Cargo.toml; a `*`
 # requirement slipping in later is worth failing on, not warning about.

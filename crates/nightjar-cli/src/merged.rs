@@ -65,10 +65,10 @@ pub(crate) fn collect(results: Vec<HostResult>) -> Vec<HostView> {
         .into_iter()
         .map(|r| {
             let (payload, remote_exit_code) = classify(r.outcome);
-            if let HostPayload::Ok(v) = &payload {
-                if let Some(warning) = skew_warning(&r.host, v) {
-                    eprintln!("{warning}");
-                }
+            if let HostPayload::Ok(v) = &payload
+                && let Some(warning) = skew_warning(&r.host, v)
+            {
+                eprintln!("{warning}");
             }
             HostView {
                 host: r.host,
