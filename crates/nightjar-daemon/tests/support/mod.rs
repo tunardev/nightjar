@@ -191,3 +191,51 @@ impl Spawner for AbandoningSpawner {
         Ok(child)
     }
 }
+
+/// Spawns a child that exits 0 and records the run as a finished success
+/// on the spot, the way a real `nightjar exec` would have by the time the
+/// daemon reaps it. Leaves `after_fired_at` NULL: stamping is the daemon's
+/// job.
+pub struct SucceedingSpawner {
+    per_job: Mutex<std::collections::HashMap<String, usize>>,
+    db_path: std::path::PathBuf,
+    clock: Arc<dyn Clock>,
+}
+
+impl SucceedingSpawner {
+    pub fn new(db_path: std::path::PathBuf, clock: Arc<dyn Clock>) -> Arc<SucceedingSpawner> {
+        Arc::new(SucceedingSpawner {
+            per_job: Mutex::new(std::collections::HashMap::new()),
+            db_path,
+            clock,
+        })
+    }
+
+    pub fn count_for(&self, job: &str) -> usize {
+        self.per_job.lock().unwrap().get(job).copied().unwrap_or(0)
+    }
+}
+
+impl Spawner for SucceedingSpawner {
+    fn spawn(&self, job: &str, run_id: &str, trigger: Trigger) -> anyhow::Result<Child> {
+        *self
+            .per_job
+            .lock()
+            .unwrap()
+            .entry(job.to_string())
+            .or_insert(0) += 1;
+        let child = Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let store = Store::open(&self.db_path)?;
+        let stub = std::path::PathBuf::from(format!("/tmp/nightjar-succeeded-{run_id}"));
+        let now = self.clock.now();
+        store.start_run(run_id, job, trigger, now, &stub, &stub)?;
+        store.set_run_pid(run_id, child.id())?;
+        store.finish_run(run_id, RunStatus::Success, Some(0), now, 0)?;
+        Ok(child)
+    }
+}

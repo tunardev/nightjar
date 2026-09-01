@@ -102,6 +102,10 @@ pub(crate) fn from_ms(v: i64) -> Result<Timestamp> {
     Ok(Timestamp::from_millisecond(v)?)
 }
 
+/// A row retention may delete: any that isn't a success still waiting for
+/// `Daemon::fire_after_triggers` to stamp it. See `prune_runs`.
+const AFTER_HANDLED: &str = "NOT (status = 'success' AND after_fired_at IS NULL)";
+
 /// Every column of `runs`, in the order `row_to_run` reads them.
 const RUN_COLUMNS: &str = "id, job, trigger, started_at, finished_at, exit_code,
                            duration_ms, status, pid, stdout_path, stderr_path, output_bytes,
@@ -435,6 +439,11 @@ impl Store {
     ///
     /// `running` rows are never counted toward a keep-count or deleted.
     /// An in-flight run has no defensible age against finished ones.
+    ///
+    /// A successful run whose `after` children have not been handled yet
+    /// (`after_fired_at IS NULL`) is never deleted either: the daemon
+    /// reads it on its next pass to fire or record those children, and a
+    /// prune in between would silently lose the trigger.
     pub fn prune_runs(
         &self,
         job: &str,
@@ -455,13 +464,15 @@ impl Store {
     /// either without the other.
     ///
     /// `running` rows are excluded, same as `prune_class`: unfinished,
-    /// not old.
+    /// not old. So are successful rows still owed an `after` pass; see
+    /// `prune_runs`.
     pub fn prune_older_than(&self, job: &str, cutoff: Timestamp) -> Result<Vec<PathBuf>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare(&format!(
             "DELETE FROM runs
               WHERE job = ?1 AND status != 'running' AND started_at < ?2
-          RETURNING stdout_path, stderr_path",
-        )?;
+                AND {AFTER_HANDLED}
+          RETURNING stdout_path, stderr_path"
+        ))?;
         let rows = stmt.query_map(
             rusqlite::params![job, ms(cutoff)],
             |r| -> rusqlite::Result<(Option<String>, Option<String>)> {
@@ -488,7 +499,7 @@ impl Store {
     fn prune_class(&self, job: &str, class: &str, keep: usize) -> Result<Vec<PathBuf>> {
         let sql = format!(
             "DELETE FROM runs
-              WHERE job = ?1 AND {class}
+              WHERE job = ?1 AND {class} AND {AFTER_HANDLED}
                 AND id NOT IN (
                     SELECT id FROM runs
                      WHERE job = ?1 AND {class}

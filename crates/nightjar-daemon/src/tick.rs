@@ -93,11 +93,6 @@ impl Daemon {
         // this position, before catch-up or `evaluate` can re-arm anything.
         self.check_overdue(&live, now);
 
-        if self.sweep_due(now) {
-            self.sweep(dir_state, &on_disk_names);
-            self.last_sweep = Some(now);
-        }
-
         // Before `evaluate`. An occurrence `evaluate` can't fit this tick
         // still goes to the back of the same queue, so draining first
         // keeps it FIFO instead of always losing to whatever just became
@@ -108,6 +103,14 @@ impl Daemon {
         // parent finish. A run that succeeded moments ago fires its child
         // this pass, not next.
         self.fire_after_triggers(&live);
+
+        // After the triggers above have stamped every handled parent.
+        // Retention spares an unstamped success (see `Store::prune_runs`),
+        // so sweeping first would leave those rows for the next sweep.
+        if self.sweep_due(now) {
+            self.sweep(dir_state, &on_disk_names);
+            self.last_sweep = Some(now);
+        }
 
         let mut fired = Vec::new();
         let mut failure: Option<anyhow::Error> = None;

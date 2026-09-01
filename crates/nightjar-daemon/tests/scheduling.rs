@@ -696,6 +696,47 @@ fn parent_run_fires_its_child_when_successful() {
     );
 }
 
+/// The parent's exec is reaped, and its row pruned by age, in the same
+/// tick that should fire the child. Retention must not win that race.
+#[test]
+fn child_still_fires_when_parent_row_ages_past_retention_before_the_next_tick() {
+    // `catchup = "none"`: a make-up run of `a` after the gap would be a
+    // second success for `b` to fire from, hiding the loss of the first.
+    let (_t, paths) = setup(&[
+        (
+            "a",
+            "command = \"true\"\nschedule = \"every 1 minute\"\ncatchup = \"none\"\n",
+        ),
+        ("b", "command = \"true\"\nafter = [\"a\"]\n"),
+    ]);
+    std::fs::write(
+        paths.config_dir.join("config.toml"),
+        "retention_age = \"5m\"\n",
+    )
+    .unwrap();
+    let clock = Arc::new(FixedClock::new("2026-06-01T00:00:00Z".parse().unwrap()));
+    let spawner = SucceedingSpawner::new(paths.db_path.clone(), clock.clone());
+    let mut d = Daemon::with_spawner(paths.clone(), clock.clone(), spawner.clone()).unwrap();
+
+    d.tick().unwrap();
+    clock.advance(jiff::Span::new().seconds(60));
+    assert_eq!(d.tick().unwrap(), vec!["a".to_string()]);
+    assert_eq!(spawner.count_for("b"), 0, "b fires only once a is reaped");
+
+    // Let `a`'s exec exit, so the next tick reaps it and prunes `a` on
+    // the spot. Then the lid closes for two hours before that tick.
+    std::thread::sleep(Duration::from_millis(200));
+    clock.advance(jiff::Span::new().hours(2));
+    for _ in 0..3 {
+        d.tick().unwrap();
+    }
+    assert_eq!(
+        spawner.count_for("b"),
+        1,
+        "retention pruned a's success row before the trigger could read it"
+    );
+}
+
 #[test]
 fn parent_run_does_not_fire_its_child_when_failed() {
     let (_t, paths) = setup(&[

@@ -133,6 +133,7 @@ fn prune_keeps_the_newest_and_returns_the_orphaned_paths() {
         store
             .finish_run(&id, RunStatus::Success, Some(0), at, 0)
             .unwrap();
+        store.set_after_fired_at(&id, at).unwrap();
     }
 
     let orphaned = store.prune_runs("j", 3, 3).unwrap();
@@ -162,6 +163,7 @@ fn prune_does_not_delete_a_running_row() {
         store
             .finish_run(&id, RunStatus::Success, Some(0), at, 0)
             .unwrap();
+        store.set_after_fired_at(&id, at).unwrap();
     }
     store
         .start_run(
@@ -201,6 +203,7 @@ fn prune_does_not_count_a_running_row_toward_the_keep_window() {
         store
             .finish_run(&id, RunStatus::Success, Some(0), at, 0)
             .unwrap();
+        store.set_after_fired_at(&id, at).unwrap();
     }
     store
         .start_run(
@@ -239,6 +242,7 @@ fn prune_runs_is_scoped_to_the_named_job() {
             store
                 .finish_run(&id, RunStatus::Success, Some(0), at, 0)
                 .unwrap();
+            store.set_after_fired_at(&id, at).unwrap();
         }
     }
 
@@ -248,6 +252,108 @@ fn prune_runs_is_scoped_to_the_named_job() {
         store.recent_runs(Some("b"), 100).unwrap().len(),
         5,
         "pruning one job must not touch another"
+    );
+}
+
+fn finished_success(store: &Store, id: &str, at: Timestamp) {
+    store
+        .start_run(
+            id,
+            "j",
+            Trigger::Schedule,
+            at,
+            Path::new(&format!("/tmp/{id}.out")),
+            Path::new(&format!("/tmp/{id}.err")),
+        )
+        .unwrap();
+    store
+        .finish_run(id, RunStatus::Success, Some(0), at, 0)
+        .unwrap();
+}
+
+#[test]
+fn keep_count_prune_spares_a_success_whose_after_children_are_still_owed() {
+    let store = Store::open_in_memory().unwrap();
+    let base: Timestamp = "2026-06-01T00:00:00Z".parse().unwrap();
+    for i in 0..5 {
+        let id = format!("r{i}");
+        let at = base + jiff::Span::new().minutes(i);
+        finished_success(&store, &id, at);
+        if i != 0 {
+            store.set_after_fired_at(&id, at).unwrap();
+        }
+    }
+
+    let orphaned = store.prune_runs("j", 1, 1).unwrap();
+
+    let left: Vec<String> = store
+        .recent_runs(Some("j"), 100)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(
+        left,
+        vec!["r4", "r0"],
+        "the oldest row is unstamped and must survive; the stamped middle rows must not"
+    );
+    assert_eq!(
+        orphaned.len(),
+        6,
+        "two files per pruned row, three rows pruned"
+    );
+
+    store.set_after_fired_at("r0", base).unwrap();
+    store.prune_runs("j", 1, 1).unwrap();
+    assert!(
+        store.get_run("r0").unwrap().is_none(),
+        "once stamped, the same row prunes like any other"
+    );
+}
+
+#[test]
+fn age_prune_spares_a_success_whose_after_children_are_still_owed() {
+    let store = Store::open_in_memory().unwrap();
+    let base: Timestamp = "2026-06-01T00:00:00Z".parse().unwrap();
+    finished_success(&store, "owed", base);
+    finished_success(&store, "handled", base);
+    store.set_after_fired_at("handled", base).unwrap();
+
+    let cutoff = base + jiff::Span::new().hours(24 * 30);
+    store.prune_older_than("j", cutoff).unwrap();
+
+    assert!(store.get_run("owed").unwrap().is_some());
+    assert!(store.get_run("handled").unwrap().is_none());
+}
+
+#[test]
+fn prune_guard_applies_only_to_successes_not_to_other_unstamped_terminal_rows() {
+    let store = Store::open_in_memory().unwrap();
+    let base: Timestamp = "2026-06-01T00:00:00Z".parse().unwrap();
+    for (i, status) in [RunStatus::Failure, RunStatus::Timeout, RunStatus::Unknown]
+        .into_iter()
+        .enumerate()
+    {
+        let id = format!("r{i}");
+        let at = base + jiff::Span::new().minutes(i64::try_from(i).unwrap());
+        store
+            .start_run(
+                &id,
+                "j",
+                Trigger::Schedule,
+                at,
+                Path::new("/tmp/o"),
+                Path::new("/tmp/e"),
+            )
+            .unwrap();
+        store.finish_run(&id, status, Some(1), at, 0).unwrap();
+    }
+
+    store.prune_runs("j", 1, 1).unwrap();
+    assert_eq!(
+        store.recent_runs(Some("j"), 100).unwrap().len(),
+        1,
+        "a failure fires nothing, so it owes nothing and prunes normally"
     );
 }
 
