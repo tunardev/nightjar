@@ -160,6 +160,13 @@ impl Notifier for DetachedNotifier {
     }
 }
 
+/// Environment, not argv, carries the failure command and webhook URL to
+/// the detached child. A Slack or Discord webhook URL is a bearer secret,
+/// and `on_failure.run` often embeds one; argv is world-readable through
+/// `ps` and `/proc/<pid>/cmdline` for as long as the channel takes.
+pub const RUN_CMD_ENV: &str = "NIGHTJAR_NOTIFY_RUN_CMD";
+pub const WEBHOOK_ENV: &str = "NIGHTJAR_NOTIFY_WEBHOOK";
+
 /// Builds the `nightjar notify` invocation for `alert`/`on_failure`. Split
 /// from spawning so a test can inspect the arguments without starting a
 /// child process.
@@ -187,11 +194,14 @@ fn notify_command(exe: &std::path::Path, alert: &Alert, on_failure: &OnFailure) 
     if on_failure.notify {
         cmd.arg("--notify");
     }
+    // Cleared, not merely unset, so a stale value in this process's own
+    // environment can never reach the child as a channel it didn't ask for.
+    cmd.env_remove(RUN_CMD_ENV).env_remove(WEBHOOK_ENV);
     if let Some(run) = &on_failure.run {
-        cmd.arg(format!("--run-cmd={run}"));
+        cmd.env(RUN_CMD_ENV, run);
     }
     if let Some(url) = &on_failure.webhook {
-        cmd.arg(format!("--webhook={url}"));
+        cmd.env(WEBHOOK_ENV, url);
     }
     Ok(cmd)
 }
@@ -804,16 +814,76 @@ mod tests {
         )
         .unwrap();
         let args: Vec<&str> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
-        assert_eq!(
-            args,
-            vec![
-                "notify",
-                "--job=j",
-                "--kind=failed",
-                "--notify",
-                "--run-cmd=echo hi",
-                "--webhook=https://example.invalid/hook",
-            ]
+        assert_eq!(args, vec!["notify", "--job=j", "--kind=failed", "--notify"]);
+
+        let envs: Vec<(String, Option<String>)> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert!(
+            envs.contains(&(RUN_CMD_ENV.to_string(), Some("echo hi".to_string()))),
+            "got: {envs:?}"
+        );
+        assert!(
+            envs.contains(&(
+                WEBHOOK_ENV.to_string(),
+                Some("https://example.invalid/hook".to_string())
+            )),
+            "got: {envs:?}"
+        );
+    }
+
+    #[test]
+    fn webhook_url_and_failure_command_never_appear_in_the_child_argv() {
+        let alert = Alert::Failed {
+            job: "j".into(),
+            exit_code: Some(1),
+        };
+        let secret_url = "https://hooks.example.invalid/services/T0/B0/s3cr3t-token";
+        let secret_cmd = "curl -H 'Authorization: Bearer s3cr3t-bearer' https://x";
+        let cmd = notify_command(
+            Path::new("/usr/local/bin/nightjar"),
+            &alert,
+            &on_failure(false, Some(secret_cmd), Some(secret_url)),
+        )
+        .unwrap();
+        let argv = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(!argv.contains("s3cr3t"), "argv is world-readable: {argv}");
+    }
+
+    #[test]
+    fn notify_command_clears_a_stale_channel_from_its_own_environment() {
+        let alert = Alert::Failed {
+            job: "j".into(),
+            exit_code: Some(1),
+        };
+        let cmd = notify_command(
+            Path::new("/usr/local/bin/nightjar"),
+            &alert,
+            &on_failure(true, None, None),
+        )
+        .unwrap();
+        let cleared: Vec<String> = cmd
+            .get_envs()
+            .filter(|(_, v)| v.is_none())
+            .map(|(k, _)| k.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            cleared.contains(&RUN_CMD_ENV.to_string()),
+            "got: {cleared:?}"
+        );
+        assert!(
+            cleared.contains(&WEBHOOK_ENV.to_string()),
+            "got: {cleared:?}"
         );
     }
 

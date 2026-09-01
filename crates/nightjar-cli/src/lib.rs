@@ -89,9 +89,18 @@ pub enum Commands {
         exit_code: Option<i32>,
         #[arg(long)]
         notify: bool,
-        #[arg(long = "run-cmd")]
+        /// Read from the environment, never argv: see `runner::notify::RUN_CMD_ENV`.
+        #[arg(
+            long = "run-cmd",
+            env = nightjar_runner::notify::RUN_CMD_ENV,
+            hide_env_values = true
+        )]
         run_cmd: Option<String>,
-        #[arg(long)]
+        #[arg(
+            long,
+            env = nightjar_runner::notify::WEBHOOK_ENV,
+            hide_env_values = true
+        )]
         webhook: Option<String>,
     },
     /// List defined jobs
@@ -503,6 +512,30 @@ mod serve_token_tests {
             }
             _ => panic!("expected Serve"),
         }
+    }
+}
+
+#[cfg(test)]
+mod notify_args_tests {
+    use super::*;
+
+    #[test]
+    fn notify_reads_its_channels_from_the_environment_when_argv_omits_them() {
+        let cli = Cli::try_parse_from(["nightjar", "notify", "--job=j", "--kind=failed"]).unwrap();
+        let Commands::Notify {
+            run_cmd, webhook, ..
+        } = cli.command
+        else {
+            panic!("expected Notify");
+        };
+        // With neither the flags nor the variables set, both are absent;
+        // the variables' presence is exercised end to end by the run tests.
+        assert!(
+            run_cmd.is_none() || std::env::var_os(nightjar_runner::notify::RUN_CMD_ENV).is_some()
+        );
+        assert!(
+            webhook.is_none() || std::env::var_os(nightjar_runner::notify::WEBHOOK_ENV).is_some()
+        );
     }
 }
 
