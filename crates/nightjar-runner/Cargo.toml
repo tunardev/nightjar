@@ -1,0 +1,28 @@
+[package]
+name = "nightjar-runner"
+description.workspace = true
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+nightjar-core.workspace = true
+nightjar-config.workspace = true
+nightjar-schedule.workspace = true
+nightjar-store.workspace = true
+anyhow.workspace = true
+jiff.workspace = true
+libc.workspace = true
+ureq.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+zeroize.workspace = true
