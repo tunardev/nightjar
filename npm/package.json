@@ -1,0 +1,28 @@
+{
+  "name": "nightjar",
+  "version": "0.1.0",
+  "description": "cron that tells you what happened",
+  "bin": {
+    "nightjar": "bin/nightjar.js"
+  },
+  "files": [
+    "bin/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tunardev/nightjar.git"
+  },
+  "keywords": [
+    "cron",
+    "scheduler",
+    "cli"
+  ],
+  "license": "MIT"
+}

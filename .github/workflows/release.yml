@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# Queue rather than cancel: two runs racing for the same tag would otherwise
+# risk `gh release create` failing (or double-uploading) mid-publish.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # rusqlite's `bundled` feature compiles its own SQLite, so cross
+      # targets need only a C toolchain, never a system sqlite.
+      - name: install the aarch64 cross toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - name: install the musl toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - run: cargo build --release -p nightjar-cli --target ${{ matrix.target }}
+
+      # `profile.release.strip = true` (Cargo.toml) already strips the
+      # binary; this step only assembles the artefact.
+      - name: package
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/nightjar" dist/nightjar
+          cp README.md LICENSE dist/
+          tar -czf "nightjar-${{ matrix.target }}.tar.gz" -C dist nightjar README.md LICENSE
+          shasum -a 256 "nightjar-${{ matrix.target }}.tar.gz" > "nightjar-${{ matrix.target }}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nightjar-${{ matrix.target }}
+          path: |
+            nightjar-${{ matrix.target }}.tar.gz
+            nightjar-${{ matrix.target }}.tar.gz.sha256
+          if-no-files-found: error
+
+  # Only reached by an actual tag push (`workflow_dispatch` never sets
+  # github.ref to a tag), so exercising this workflow by hand can never
+  # publish anything.
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" artifacts/*/*.tar.gz artifacts/*/*.tar.gz.sha256 \
+            --title "${{ github.ref_name }}" --generate-notes
