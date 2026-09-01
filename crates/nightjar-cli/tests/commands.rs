@@ -110,6 +110,36 @@ fn add_rejects_before_writing_anything_when_timeout_or_catchup_is_invalid() {
 }
 
 #[test]
+fn status_exits_nonzero_and_names_the_job_when_the_filter_matches_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    nj(
+        tmp.path(),
+        &["add", "real", "--cmd", "true", "--at", "hourly"],
+    );
+
+    let out = nj(tmp.path(), &["status", "ghost"]);
+    assert!(
+        !out.status.success(),
+        "an unknown job is a mistake, not an empty report"
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("ghost"));
+
+    let out = nj(tmp.path(), &["status", "ghost", "--json"]);
+    assert!(!out.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        body["error"].as_str().unwrap_or_default().contains("ghost"),
+        "got: {body}"
+    );
+
+    let out = nj(tmp.path(), &["status", "real"]);
+    assert!(
+        out.status.success(),
+        "the filter still works for a job that exists"
+    );
+}
+
+#[test]
 fn add_rejects_when_job_name_contains_path_separator() {
     let tmp = tempfile::tempdir().unwrap();
     let out = nj(

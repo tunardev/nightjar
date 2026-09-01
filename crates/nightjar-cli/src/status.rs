@@ -1,5 +1,5 @@
 use crate::merged::{self, HostPayload, HostView};
-use anyhow::Result;
+use anyhow::{Result, bail};
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use nightjar_config::Job;
@@ -74,19 +74,27 @@ pub fn cmd_status(job_filter: Option<&str>, json: bool) -> Result<i32> {
     };
     let any_invalid = jobs.iter().any(|(_, r)| r.is_err());
 
+    // A filter that matches nothing is a mistake in the command, not an
+    // empty fleet: report it the way `logs` reports an unknown run.
+    if let Some(f) = job_filter
+        && jobs.is_empty()
+        && matches!(dir_state, JobsDirState::Present)
+    {
+        let msg = format!("no such job: {f}");
+        if json {
+            println!(
+                "{}",
+                json!({ "schema": merged::SCHEMA_VERSION, "error": msg })
+            );
+            return Ok(1);
+        }
+        bail!("{msg}");
+    }
+
     if json {
         return render_status_json(&store, &jobs, now, &tz, any_invalid);
     }
-    render_status_table(
-        &store,
-        &paths,
-        &jobs,
-        dir_state,
-        job_filter,
-        now,
-        &tz,
-        any_invalid,
-    )
+    render_status_table(&store, &paths, &jobs, dir_state, now, &tz, any_invalid)
 }
 
 pub(crate) fn cmd_status_remote(results: Vec<HostResult>, local_json: bool) -> i32 {
@@ -272,13 +280,11 @@ fn render_status_json(
     Ok(i32::from(any_invalid))
 }
 
-#[allow(clippy::too_many_arguments)] // one render call, not a public API worth a params struct
 fn render_status_table(
     store: &Store,
     paths: &Paths,
     jobs: &[(String, Result<Job>)],
     dir_state: JobsDirState,
-    job_filter: Option<&str>,
     now: Timestamp,
     tz: &TimeZone,
     any_invalid: bool,
@@ -292,13 +298,10 @@ fn render_status_table(
     }
 
     if jobs.is_empty() {
-        match job_filter {
-            Some(f) => println!("no such job: {f}"),
-            None => println!(
-                "no jobs configured yet (add a .toml file to {})",
-                paths.jobs_dir.display()
-            ),
-        }
+        println!(
+            "no jobs configured yet (add a .toml file to {})",
+            paths.jobs_dir.display()
+        );
         return Ok(0);
     }
 
