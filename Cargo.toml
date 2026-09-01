@@ -1,0 +1,60 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+description = "cron that tells you what happened"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/tunardev/nightjar"
+authors = []
+keywords = ["cron", "scheduler", "cli", "systemd", "launchd"]
+categories = ["command-line-utilities", "date-and-time"]
+
+[workspace.dependencies]
+nightjar-cli = { path = "crates/nightjar-cli", version = "0.1.0" }
+nightjar-config = { path = "crates/nightjar-config", version = "0.1.0" }
+nightjar-core = { path = "crates/nightjar-core", version = "0.1.0" }
+nightjar-daemon = { path = "crates/nightjar-daemon", version = "0.1.0" }
+nightjar-remote = { path = "crates/nightjar-remote", version = "0.1.0" }
+nightjar-runner = { path = "crates/nightjar-runner", version = "0.1.0" }
+nightjar-schedule = { path = "crates/nightjar-schedule", version = "0.1.0" }
+nightjar-store = { path = "crates/nightjar-store", version = "0.1.0" }
+nightjar-tui = { path = "crates/nightjar-tui", version = "0.1.0" }
+nightjar-web = { path = "crates/nightjar-web", version = "0.1.0" }
+
+anyhow = "1"
+base64 = "0.23"
+clap = { version = "4", features = ["derive", "env"] }
+crossterm = "0.29.0"
+jiff = "0.2"
+jiff-cron = "0.3"
+libc = "0.2"
+owo-colors = { version = "4", features = ["supports-colors"] }
+ratatui = "0.29.0"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+signal-hook = "0.4.4"
+subtle = "2.6"
+tiny_http = { version = "0.12", default-features = false }
+toml = "0.8"
+toml_edit = "0.22"
+ureq = "3"
+uuid = { version = "1", features = ["v7"] }
+zeroize = "1"
+
+portable-pty = "0.9.0"
+tempfile = "3"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+
+[profile.release]
+strip = true

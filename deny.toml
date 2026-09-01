@@ -1,0 +1,55 @@
+# cargo-deny config. Run `cargo deny check` locally; see .github/workflows/ci.yml
+# for the CI job. Full reference: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Only the platforms nightjar actually ships for. Without this, purely
+# target-gated dependencies for platforms we never build on (wasm, UEFI) drag
+# their own licenses and advisories into every check.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+
+[advisories]
+ignore = [
+    # ratatui's transitive dep, no alternative available; unmaintained, not
+    # a vulnerability. Revisit if ratatui drops it or a CVE lands on top.
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained but not vulnerable; pulled in by ratatui" },
+]
+
+[licenses]
+# The exact set actually present in Cargo.lock for the targets above — not a
+# broad "anything permissive" list. `cargo deny check licenses` fails loudly
+# if a new dependency brings in something not on this list.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[bans]
+# Informational: two crates each carrying two semver-incompatible versions
+# (windows-sys, winnow) via unrelated dependency chains. Nothing to fix on
+# our side; denying here would just make routine dependency bumps flaky.
+multiple-versions = "warn"
+# This project pins every dependency to a real version in Cargo.toml; a `*`
+# requirement slipping in later is worth failing on, not warning about.
+wildcards = "deny"
+
+[sources]
+# Every dependency comes from crates.io. A git or unknown-registry source
+# appearing later is exactly the kind of supply-chain surprise this file
+# exists to catch.
+unknown-registry = "deny"
+unknown-git = "deny"
