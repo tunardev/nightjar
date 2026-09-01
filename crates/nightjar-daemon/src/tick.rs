@@ -12,7 +12,7 @@ use nightjar_store::run::Trigger;
 use nightjar_store::{Store, overdue_since};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// Minimum pause after a failed tick, not `sleep_for`. A failed tick may
 /// not have advanced `self.next_run_at`, so `sleep_for` would return zero
@@ -691,7 +691,12 @@ struct InFlightGuard {
 
 impl Drop for InFlightGuard {
     fn drop(&mut self) {
-        self.in_flight.lock().unwrap().remove(&self.job);
+        // Poison-tolerant: a panic on another dispatch thread must not turn
+        // this drop into a second panic, which would abort the daemon.
+        self.in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.job);
     }
 }
 
@@ -784,7 +789,10 @@ impl Daemon {
         }
 
         {
-            let mut in_flight = self.overdue_dispatch_in_flight.lock().unwrap();
+            let mut in_flight = self
+                .overdue_dispatch_in_flight
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
             if !in_flight.insert(job.name.clone()) {
                 return;
             }

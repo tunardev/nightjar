@@ -41,10 +41,48 @@ pub(crate) fn stop_requested() -> bool {
 
 pub(crate) fn sleep_unless_stopping(total: std::time::Duration) {
     let start = std::time::Instant::now();
-    while start.elapsed() < total {
+    loop {
         if stop_requested() {
             return;
         }
-        std::thread::sleep(STOP_POLL.min(total.checked_sub(start.elapsed()).unwrap()));
+        // Read once. Two `elapsed()` reads can straddle the deadline, and
+        // a `checked_sub` on the second would panic the daemon.
+        let remaining = total.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            return;
+        }
+        std::thread::sleep(STOP_POLL.min(remaining));
+    }
+}
+
+#[cfg(test)]
+mod sleep_tests {
+    use super::sleep_unless_stopping;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn zero_duration_returns_immediately() {
+        let started = Instant::now();
+        sleep_unless_stopping(Duration::ZERO);
+        assert!(started.elapsed() < Duration::from_millis(100));
+    }
+
+    #[test]
+    fn sleeps_for_roughly_the_requested_time() {
+        let started = Instant::now();
+        sleep_unless_stopping(Duration::from_millis(30));
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(30),
+            "slept only {elapsed:?}"
+        );
+        assert!(elapsed < Duration::from_secs(2), "overslept: {elapsed:?}");
+    }
+
+    #[test]
+    fn tiny_durations_never_panic_when_hammered() {
+        for _ in 0..200 {
+            sleep_unless_stopping(Duration::from_nanos(1));
+        }
     }
 }
