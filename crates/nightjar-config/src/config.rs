@@ -132,11 +132,27 @@ impl Config {
             cfg.heartbeat_interval = d;
         }
         if let Some(v) = raw.retention_runs {
+            if v == 0 {
+                bail!(
+                    "{}: retention_runs: 0 would delete every run the moment it finishes, \
+                     leaving nothing for `status`, `logs`, or an `after` chain to read; \
+                     use 1 or more",
+                    path.display()
+                );
+            }
             cfg.retention_runs = v;
         }
         if let Some(v) = raw.retention_age {
-            cfg.retention_age = parse_duration(&v)
+            let d = parse_duration(&v)
                 .map_err(|e| anyhow::anyhow!("{}: retention_age: {e}", path.display()))?;
+            if d.is_zero() {
+                bail!(
+                    "{}: retention_age: {v:?} would delete every run the moment it finishes; \
+                     use a positive duration",
+                    path.display()
+                );
+            }
+            cfg.retention_age = d;
         }
         if let Some(v) = raw.output_cap {
             cfg.output_cap = parse_size(&v)
@@ -265,6 +281,26 @@ queue_depth        = 4
         assert!(!c.login_shell);
         assert_eq!(c.catchup_max, 3);
         assert_eq!(c.queue_depth, 4);
+    }
+
+    #[test]
+    fn retention_runs_is_rejected_when_it_is_zero() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("config.toml"), "retention_runs = 0\n").unwrap();
+        let err = Config::load(&Paths::for_root(tmp.path()))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("retention_runs"), "got: {err}");
+    }
+
+    #[test]
+    fn retention_age_is_rejected_when_it_is_zero() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("config.toml"), "retention_age = \"0s\"\n").unwrap();
+        let err = Config::load(&Paths::for_root(tmp.path()))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("retention_age"), "got: {err}");
     }
 
     #[test]
