@@ -33,7 +33,7 @@ detect_target() {
             elif [ "$arch" = x86_64 ]; then
                 echo "x86_64-unknown-linux-musl"
             else
-                die "no $arch build exists for a system without glibc; build from source with \`cargo install nightjar\`"
+                die "no $arch build exists for a system without glibc; build from source with \`cargo install --git https://github.com/$REPO nightjar-cli\`"
             fi
             ;;
         *) die "unsupported operating system: $os" ;;
@@ -92,9 +92,13 @@ fi
 tar -xzf "$archive" -C "$tmp" nightjar || die "archive did not contain a nightjar binary"
 
 # Replace by rename so an install over a running daemon's binary cannot hand
-# it a half-written file.
-chmod +x "$tmp/nightjar"
-mv -f "$tmp/nightjar" "$dir/nightjar"
+# it a half-written file. The staging copy lives in the target directory:
+# a rename is only atomic within one filesystem, and $tmp is usually not on
+# the same one as /usr/local/bin.
+staged="$dir/.nightjar.installing.$$"
+cp "$tmp/nightjar" "$staged" || die "cannot write to $dir"
+chmod +x "$staged"
+mv -f "$staged" "$dir/nightjar"
 
 echo "install: installed $("$dir/nightjar" --version) to $dir/nightjar"
 case ":$PATH:" in
