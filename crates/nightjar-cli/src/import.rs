@@ -93,11 +93,18 @@ fn import_line(paths: &Paths, line: &str, enable: bool) -> Result<String> {
         );
     }
     let tokens: Vec<&str> = line.split_whitespace().collect();
-    if tokens.len() < 6 {
-        bail!("not a crontab line (need 5 schedule fields and a command): {line:?}");
+    // `@daily cmd` carries its schedule in one token; everything else
+    // in five.
+    let schedule_fields = if tokens.first().is_some_and(|t| t.starts_with('@')) {
+        1
+    } else {
+        5
+    };
+    if tokens.len() <= schedule_fields {
+        bail!("not a crontab line (need a schedule and a command): {line:?}");
     }
-    let schedule_expr = tokens[0..5].join(" ");
-    let command = tokens[5..].join(" ");
+    let schedule_expr = tokens[..schedule_fields].join(" ");
+    let command = tokens[schedule_fields..].join(" ");
 
     // Reuses `Schedule::parse` instead of a second parser. POSIX and
     // Quartz disagree on whether Sunday is 0 or 1.
@@ -269,6 +276,32 @@ mod tests {
         let (second, _) = unique_job_path(&paths, "backup").unwrap();
         assert_ne!(first, second);
         assert_eq!(second, "backup-2");
+    }
+
+    #[test]
+    fn crontab_shortcut_line_imports_with_its_shortcut_as_the_schedule() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_root(tmp.path());
+        paths.ensure_dirs().unwrap();
+
+        let report = import_crontab(
+            &paths,
+            "@daily /usr/local/bin/backup.sh --full\n@reboot /usr/bin/agent\n",
+            false,
+        );
+
+        assert_eq!(report.written.len(), 1, "skipped: {:?}", report.skipped);
+        assert_eq!(report.written[0].name, "backup-sh");
+        let body = std::fs::read_to_string(paths.jobs_dir.join("backup-sh.toml")).unwrap();
+        assert!(body.contains("schedule = \"@daily\""), "got: {body}");
+        assert!(body.contains("--full"), "got: {body}");
+
+        assert_eq!(report.skipped.len(), 1);
+        assert!(
+            report.skipped[0].1.contains("@reboot"),
+            "got: {:?}",
+            report.skipped[0]
+        );
     }
 
     #[test]

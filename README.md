@@ -39,8 +39,9 @@ schedule = "daily at 2am"
 ```
 
 That's the whole file. `schedule` reads like English — `hourly`, `daily at
-2am`, `weekdays at 9am`, `every 15 minutes`, `weekly sun at 3am` — or a
-five-field cron expression like `*/15 * * * *`.
+2am`, `weekdays at 9am`, `every 15 minutes`, `weekly sun at 3am` — a
+five-field cron expression like `*/15 * * * *`, or a crontab shortcut like
+`@daily`.
 
 Everything else is optional:
 

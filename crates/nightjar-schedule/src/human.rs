@@ -6,8 +6,13 @@ pub fn to_cron(input: &str) -> Option<String> {
     let words: Vec<&str> = lower.split_whitespace().collect();
 
     match words.as_slice() {
-        ["hourly"] => Some("0 * * * *".to_string()),
-        ["daily"] => Some("0 0 * * *".to_string()),
+        // The crontab(5) shortcuts, spelled the way `crontab -l` prints
+        // them, so `nightjar import` and a hand-written job file agree.
+        ["hourly" | "@hourly"] => Some("0 * * * *".to_string()),
+        ["daily" | "@daily" | "@midnight"] => Some("0 0 * * *".to_string()),
+        ["@weekly"] => Some("0 0 * * 0".to_string()),
+        ["@monthly"] => Some("0 0 1 * *".to_string()),
+        ["@yearly" | "@annually"] => Some("0 0 1 1 *".to_string()),
         ["daily", "at", t] => {
             let (h, m) = parse_time(t)?;
             Some(format!("{m} {h} * * *"))
@@ -104,6 +109,24 @@ mod tests {
     fn to_cron_returns_the_expected_cron_when_input_is_a_bare_keyword() {
         assert_eq!(to_cron("hourly").as_deref(), Some("0 * * * *"));
         assert_eq!(to_cron("daily").as_deref(), Some("0 0 * * *"));
+    }
+
+    #[test]
+    fn crontab_at_shortcuts_lower_to_the_same_cron_as_cron_itself() {
+        assert_eq!(to_cron("@hourly").as_deref(), Some("0 * * * *"));
+        assert_eq!(to_cron("@daily").as_deref(), Some("0 0 * * *"));
+        assert_eq!(to_cron("@midnight").as_deref(), Some("0 0 * * *"));
+        assert_eq!(to_cron("@weekly").as_deref(), Some("0 0 * * 0"));
+        assert_eq!(to_cron("@monthly").as_deref(), Some("0 0 1 * *"));
+        assert_eq!(to_cron("@yearly").as_deref(), Some("0 0 1 1 *"));
+        assert_eq!(to_cron("@annually").as_deref(), Some("0 0 1 1 *"));
+        assert_eq!(to_cron("@Daily").as_deref(), Some("0 0 * * *"));
+    }
+
+    #[test]
+    fn unknown_at_shortcut_is_not_guessed() {
+        assert_eq!(to_cron("@reboot"), None);
+        assert_eq!(to_cron("@fortnightly"), None);
     }
 
     #[test]

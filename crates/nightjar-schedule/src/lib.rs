@@ -31,6 +31,14 @@ impl Schedule {
     pub fn parse(input: &str) -> Result<Schedule> {
         let as_cron = match human::to_cron(input) {
             Some(c) => c,
+            None if input.trim().eq_ignore_ascii_case("@reboot") => bail!(
+                "invalid schedule {input:?}: @reboot runs at boot, not on a schedule, and has \
+                 no equivalent here — give the job a schedule, or leave it to cron"
+            ),
+            None if input.trim().starts_with('@') => bail!(
+                "invalid schedule {input:?}: unknown crontab shortcut; the supported ones are \
+                 @hourly, @daily, @midnight, @weekly, @monthly, @yearly, and @annually"
+            ),
             None => match leading_human_keyword(input) {
                 Some(keyword) => bail!(
                     "invalid schedule {input:?}: looks like human schedule syntax \
@@ -267,6 +275,30 @@ mod tests {
                 "leaked a jiff-cron-flavoured message for {bad:?}: {err}"
             );
         }
+    }
+
+    #[test]
+    fn crontab_shortcut_fires_when_cron_would() {
+        assert_fires("@daily", "2026-08-24 00:00 Monday");
+        assert_fires("@hourly", "2026-08-23 13:00 Sunday");
+        assert_fires("@weekly", "2026-08-30 00:00 Sunday");
+        assert_fires("@monthly", "2026-09-01 00:00 Tuesday");
+        assert_fires("@yearly", "2027-01-01 00:00 Friday");
+    }
+
+    #[test]
+    fn reboot_and_unknown_shortcuts_are_refused_with_a_message_that_names_them() {
+        let err = Schedule::parse("@reboot").unwrap_err().to_string();
+        assert!(
+            err.contains("@reboot") && err.contains("boot"),
+            "got: {err}"
+        );
+
+        let err = Schedule::parse("@fortnightly").unwrap_err().to_string();
+        assert!(
+            err.contains("@fortnightly") && err.contains("@daily"),
+            "got: {err}"
+        );
     }
 
     #[test]
