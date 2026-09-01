@@ -7,14 +7,14 @@ use nightjar_config::job::next_column;
 use nightjar_config::job::{JobsDirState, probe_jobs_dir};
 use nightjar_core::clock::{Clock, SystemClock};
 use nightjar_core::format::{
-    abbreviate_schedule, duration_human, error_summary, json_string, relative_future, relative_time,
+    abbreviate_schedule, duration_human, error_summary, relative_future, relative_time,
 };
 use nightjar_core::paths::Paths;
 use nightjar_remote::HostResult;
 use nightjar_store::run::RunStatus;
 use nightjar_store::{DaemonBeat, Store, overdue_since};
 use owo_colors::{OwoColorize, Stream};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::fmt::Write as _;
 
 /// 90s is three heartbeat intervals. One missed beat is scheduling
@@ -45,17 +45,14 @@ fn daemon_line(store: &Store, now: Timestamp) -> Result<String> {
 
 /// A monitoring script has no other way to learn the scheduler died.
 /// Waiting for `next_ms` gives no signal until a job is overdue.
-fn daemon_state_json(store: &Store, now: Timestamp) -> Result<String> {
+fn daemon_state_json(store: &Store, now: Timestamp) -> Result<Value> {
     Ok(match daemon_state(store, now)? {
-        None => r#"{"state":"never_run","heartbeat_ms":null,"pid":null}"#.to_string(),
-        Some((b, stale)) => {
-            let label = if stale { "not_responding" } else { "running" };
-            format!(
-                r#"{{"state":"{label}","heartbeat_ms":{},"pid":{}}}"#,
-                b.at.as_millisecond(),
-                b.pid
-            )
-        }
+        None => json!({ "state": "never_run", "heartbeat_ms": null, "pid": null }),
+        Some((b, stale)) => json!({
+            "state": if stale { "not_responding" } else { "running" },
+            "heartbeat_ms": b.at.as_millisecond(),
+            "pid": b.pid,
+        }),
     })
 }
 
@@ -223,15 +220,21 @@ fn render_status_json(
     tz: &TimeZone,
     any_invalid: bool,
 ) -> Result<i32> {
-    let mut rows = Vec::new();
+    let mut rows = Vec::with_capacity(jobs.len());
     for (name, loaded) in jobs {
         let row = match loaded {
             // An invalid job has no schedule to be overdue against.
-            Err(e) => format!(
-                r#"{{"job":{},"schedule":null,"status":"invalid","error":{},"exit_code":null,"duration_ms":null,"last_run_ms":null,"next_ms":null,"overdue":false}}"#,
-                json_string(name),
-                json_string(&error_summary(e)),
-            ),
+            Err(e) => json!({
+                "job": name,
+                "schedule": null,
+                "status": "invalid",
+                "error": error_summary(e),
+                "exit_code": null,
+                "duration_ms": null,
+                "last_run_ms": null,
+                "next_ms": null,
+                "overdue": false,
+            }),
             Ok(job) => {
                 let last = store.last_run(name)?;
                 let state = store.job_state(name)?;
@@ -239,43 +242,32 @@ fn render_status_json(
                 // `Ok(None)` is reachable: jiff-cron's search is bounded
                 // at year 2100. Both it and a computation error collapse
                 // to `null` here.
-                let next_ms = match &job.schedule {
-                    Some(s) => match s.next_after(now, tz) {
+                let next_ms = job
+                    .schedule
+                    .as_ref()
+                    .and_then(|s| match s.next_after(now, tz) {
                         Ok(Some(t)) => Some(t.as_millisecond()),
                         Ok(None) | Err(_) => None,
-                    },
-                    None => None,
-                };
-                let schedule_json = job
-                    .schedule_source()
-                    .map_or_else(|| "null".into(), json_string);
-                format!(
-                    r#"{{"job":{},"schedule":{},"status":{},"error":null,"exit_code":{},"duration_ms":{},"last_run_ms":{},"next_ms":{},"overdue":{overdue}}}"#,
-                    json_string(name),
-                    schedule_json,
-                    last.as_ref()
-                        .map_or_else(|| "null".into(), |r| json_string(r.status.as_str())),
-                    last.as_ref()
-                        .and_then(|r| r.exit_code)
-                        .map_or_else(|| "null".into(), |c| c.to_string()),
-                    last.as_ref()
-                        .and_then(|r| r.duration_ms)
-                        .map_or_else(|| "null".into(), |d| d.to_string()),
-                    last.as_ref().map_or_else(
-                        || "null".into(),
-                        |r| r.started_at.as_millisecond().to_string()
-                    ),
-                    next_ms.map_or_else(|| "null".into(), |n| n.to_string()),
-                )
+                    });
+                json!({
+                    "job": name,
+                    "schedule": job.schedule_source(),
+                    "status": last.as_ref().map(|r| r.status.as_str()),
+                    "error": null,
+                    "exit_code": last.as_ref().and_then(|r| r.exit_code),
+                    "duration_ms": last.as_ref().and_then(|r| r.duration_ms),
+                    "last_run_ms": last.as_ref().map(|r| r.started_at.as_millisecond()),
+                    "next_ms": next_ms,
+                    "overdue": overdue,
+                })
             }
         };
         rows.push(row);
     }
     let daemon = daemon_state_json(store, now)?;
     println!(
-        r#"{{"schema":{},"daemon":{daemon},"jobs":[{}]}}"#,
-        merged::SCHEMA_VERSION,
-        rows.join(",")
+        "{}",
+        json!({ "schema": merged::SCHEMA_VERSION, "daemon": daemon, "jobs": rows })
     );
     Ok(i32::from(any_invalid))
 }
@@ -537,8 +529,9 @@ mod daemon_state_json_tests {
         let store = Store::open_in_memory().unwrap();
         let now = ts("2026-06-01T00:00:00Z");
         assert_eq!(
-            daemon_state_json(&store, now).unwrap(),
-            r#"{"state":"never_run","heartbeat_ms":null,"pid":null}"#
+            daemon_state_json(&store, now).unwrap().to_string(),
+            r#"{"state":"never_run","heartbeat_ms":null,"pid":null}"#,
+            "key order is part of the documented output"
         );
     }
 
@@ -548,12 +541,9 @@ mod daemon_state_json_tests {
         let now = ts("2026-06-01T00:00:00Z");
         store.write_heartbeat(now, 4242, "0.1.0").unwrap();
         let s = daemon_state_json(&store, now).unwrap();
-        assert!(s.contains(r#""state":"running""#), "got: {s}");
-        assert!(
-            s.contains(&format!(r#""heartbeat_ms":{}"#, now.as_millisecond())),
-            "got: {s}"
-        );
-        assert!(s.contains(r#""pid":4242"#), "got: {s}");
+        assert_eq!(s["state"], "running", "got: {s}");
+        assert_eq!(s["heartbeat_ms"], now.as_millisecond(), "got: {s}");
+        assert_eq!(s["pid"], 4242, "got: {s}");
     }
 
     #[test]
@@ -563,7 +553,7 @@ mod daemon_state_json_tests {
         let now = beat_at + jiff::Span::new().seconds(HEARTBEAT_STALE_AFTER + 1);
         store.write_heartbeat(beat_at, 4242, "0.1.0").unwrap();
         let s = daemon_state_json(&store, now).unwrap();
-        assert!(s.contains(r#""state":"not_responding""#), "got: {s}");
+        assert_eq!(s["state"], "not_responding", "got: {s}");
     }
 }
 

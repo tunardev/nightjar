@@ -2,11 +2,11 @@ use crate::merged::{self, HostPayload, HostView};
 use anyhow::Result;
 use nightjar_config::Job;
 use nightjar_config::job::{JobsDirState, probe_jobs_dir};
-use nightjar_core::format::{error_summary, json_string};
+use nightjar_core::format::error_summary;
 use nightjar_core::paths::Paths;
 use nightjar_remote::HostResult;
 use owo_colors::{OwoColorize, Stream};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::fmt::Write as _;
 
 pub fn cmd_list(json: bool) -> Result<i32> {
@@ -14,7 +14,10 @@ pub fn cmd_list(json: bool) -> Result<i32> {
 
     if let JobsDirState::Missing = probe_jobs_dir(&paths.jobs_dir)? {
         if json {
-            println!(r#"{{"schema":{},"jobs":[]}}"#, merged::SCHEMA_VERSION);
+            println!(
+                "{}",
+                json!({ "schema": merged::SCHEMA_VERSION, "jobs": [] })
+            );
         } else {
             println!(
                 "no jobs directory yet; create one at {}",
@@ -61,32 +64,28 @@ pub fn cmd_list(json: bool) -> Result<i32> {
 }
 
 fn print_json(jobs: &[(String, Result<Job>)]) {
-    let rows: Vec<String> = jobs
+    let rows: Vec<Value> = jobs
         .iter()
         .map(|(name, result)| match result {
-            Ok(j) => {
-                let state = if j.enabled { "enabled" } else { "disabled" };
-                let schedule_json = j
-                    .schedule_source()
-                    .map_or_else(|| "null".into(), json_string);
-                format!(
-                    r#"{{"job":{},"schedule":{},"state":{},"status":"ok","error":null}}"#,
-                    json_string(name),
-                    schedule_json,
-                    json_string(state),
-                )
-            }
-            Err(e) => format!(
-                r#"{{"job":{},"schedule":null,"state":null,"status":"invalid","error":{}}}"#,
-                json_string(name),
-                json_string(&error_summary(e)),
-            ),
+            Ok(j) => json!({
+                "job": name,
+                "schedule": j.schedule_source(),
+                "state": if j.enabled { "enabled" } else { "disabled" },
+                "status": "ok",
+                "error": null,
+            }),
+            Err(e) => json!({
+                "job": name,
+                "schedule": null,
+                "state": null,
+                "status": "invalid",
+                "error": error_summary(e),
+            }),
         })
         .collect();
     println!(
-        r#"{{"schema":{},"jobs":[{}]}}"#,
-        merged::SCHEMA_VERSION,
-        rows.join(",")
+        "{}",
+        json!({ "schema": merged::SCHEMA_VERSION, "jobs": rows })
     );
 }
 

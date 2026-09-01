@@ -5,11 +5,12 @@ use jiff::tz::TimeZone;
 use nightjar_config::Job;
 use nightjar_config::job::{JobsDirState, probe_jobs_dir};
 use nightjar_core::clock::{Clock, SystemClock};
-use nightjar_core::format::{error_summary, json_string, relative_time};
+use nightjar_core::format::{error_summary, relative_time};
 use nightjar_core::paths::Paths;
 use nightjar_runner::service;
 use nightjar_store::{DaemonBeat, Store};
 use owo_colors::{OwoColorize, Stream};
+use serde_json::{Value, json};
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -378,18 +379,15 @@ fn print_human(checks: &[Check]) {
 }
 
 fn print_json(checks: &[Check]) {
-    let items: Vec<String> = checks
+    println!("{}", checks_json(checks));
+}
+
+fn checks_json(checks: &[Check]) -> Value {
+    let items: Vec<Value> = checks
         .iter()
-        .map(|c| {
-            format!(
-                r#"{{"name":{},"status":"{}","message":{}}}"#,
-                json_string(c.name),
-                c.status.as_str(),
-                json_string(&c.message)
-            )
-        })
+        .map(|c| json!({ "name": c.name, "status": c.status.as_str(), "message": c.message }))
         .collect();
-    println!(r#"{{"checks":[{}]}}"#, items.join(","));
+    json!({ "checks": items })
 }
 
 #[cfg(test)]
@@ -505,23 +503,14 @@ mod tests {
     fn json_output_has_no_ansi_and_names_every_check() {
         let checks = [
             Check::pass("store", "ok".into()),
-            Check::fail("daemon", "dead".into()),
+            Check::fail("daemon", "dead \"quoted\"".into()),
         ];
-        let items: Vec<String> = checks
-            .iter()
-            .map(|c| {
-                format!(
-                    r#"{{"name":{},"status":"{}","message":{}}}"#,
-                    json_string(c.name),
-                    c.status.as_str(),
-                    json_string(&c.message)
-                )
-            })
-            .collect();
-        let s = format!(r#"{{"checks":[{}]}}"#, items.join(","));
+        let v = checks_json(&checks);
+        let s = v.to_string();
         assert!(!s.contains('\u{1b}'));
-        assert!(s.contains("\"name\":\"store\""));
-        assert!(s.contains("\"name\":\"daemon\""));
-        assert!(s.contains("\"status\":\"fail\""));
+        assert_eq!(v["checks"][0]["name"], "store");
+        assert_eq!(v["checks"][1]["name"], "daemon");
+        assert_eq!(v["checks"][1]["status"], "fail");
+        assert_eq!(v["checks"][1]["message"], "dead \"quoted\"");
     }
 }

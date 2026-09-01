@@ -3,7 +3,6 @@ use jiff::Timestamp;
 use nightjar_config::OnFailure;
 use nightjar_config::redact::redact_text;
 use nightjar_config::secrets::SecretValue;
-use nightjar_core::format::json_string;
 use nightjar_core::paths::Paths;
 use nightjar_core::process::{own_process_group, signal_group};
 use nightjar_store::Store;
@@ -486,17 +485,15 @@ fn post_webhook(url: &str, alert: &Alert, redact: &[SecretValue], timeout: Durat
 }
 
 /// Redacts the job name and summary before JSON-escaping, not after. A
-/// secret containing a quote or backslash comes out of `json_string`
+/// secret containing a quote or backslash comes out of the encoder
 /// different from its raw form. Matching only works before that runs.
 fn webhook_body(alert: &Alert, redact: &[SecretValue]) -> String {
-    let job = redact_text(redact, alert.job());
-    let summary = redact_text(redact, &alert.summary());
-    format!(
-        r#"{{"job":{},"kind":{},"summary":{}}}"#,
-        json_string(&job),
-        json_string(alert.kind()),
-        json_string(&summary),
-    )
+    serde_json::json!({
+        "job": redact_text(redact, alert.job()),
+        "kind": alert.kind(),
+        "summary": redact_text(redact, &alert.summary()),
+    })
+    .to_string()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -986,11 +983,14 @@ mod tests {
     }
 
     #[test]
-    fn json_string_escapes_control_and_special_characters() {
-        assert_eq!(json_string("hello"), "\"hello\"");
-        assert_eq!(json_string(r#"a"b"#), r#""a\"b""#);
-        assert_eq!(json_string(r"a\b"), r#""a\\b""#);
-        assert_eq!(json_string("a\nb"), r#""a\nb""#);
+    fn webhook_body_is_valid_json_when_the_job_name_needs_escaping() {
+        let alert = Alert::Failed {
+            job: "we\"ird\\name\n".into(),
+            exit_code: Some(1),
+        };
+        let body: serde_json::Value = serde_json::from_str(&webhook_body(&alert, &[])).unwrap();
+        assert_eq!(body["job"], "we\"ird\\name\n");
+        assert_eq!(body["kind"], "failed");
     }
 
     #[test]

@@ -1,12 +1,11 @@
 use crate::merged::{self, HostPayload, HostView};
 use crate::read_captured;
 use anyhow::{Context, Result, bail};
-use nightjar_core::format::json_string;
 use nightjar_core::paths::Paths;
 use nightjar_remote::HostResult;
 use nightjar_store::Store;
 use nightjar_store::run::{Run, RunStatus};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::fmt::Write as _;
 use std::io::Write;
 use std::path::Path;
@@ -60,9 +59,8 @@ pub fn cmd_logs(
         Lookup::NoRuns => {
             if json {
                 println!(
-                    r#"{{"schema":{},"job":{},"run":null}}"#,
-                    merged::SCHEMA_VERSION,
-                    json_string(job)
+                    "{}",
+                    json!({ "schema": merged::SCHEMA_VERSION, "job": job, "run": null })
                 );
             } else {
                 println!("no runs recorded for {job}");
@@ -70,24 +68,23 @@ pub fn cmd_logs(
             Ok(0)
         }
         Lookup::NotFound(id) => {
+            let msg = format!("no such run: {id}");
             if json {
                 println!(
-                    r#"{{"schema":{},"error":{}}}"#,
-                    merged::SCHEMA_VERSION,
-                    json_string(&format!("no such run: {id}"))
+                    "{}",
+                    json!({ "schema": merged::SCHEMA_VERSION, "error": msg })
                 );
                 Ok(1)
             } else {
-                bail!("no such run: {id}")
+                bail!("{msg}")
             }
         }
         Lookup::WrongJob(id, actual) => {
             let msg = format!("run {id} belongs to job {actual:?}, not {job:?}");
             if json {
                 println!(
-                    r#"{{"schema":{},"error":{}}}"#,
-                    merged::SCHEMA_VERSION,
-                    json_string(&msg)
+                    "{}",
+                    json!({ "schema": merged::SCHEMA_VERSION, "error": msg })
                 );
                 Ok(1)
             } else {
@@ -191,24 +188,23 @@ fn emit_json(run: &Run, lines: Option<usize>) -> Result<i32> {
     let stderr = read_tail_lossy(run.stderr_path.as_deref(), lines)?;
 
     println!(
-        r#"{{"schema":{},"job":{},"run":{{"id":{},"trigger":{},"status":{},"exit_code":{},"started_ms":{},"finished_ms":{},"duration_ms":{},"message":{}}},"stdout":{},"stderr":{}}}"#,
-        merged::SCHEMA_VERSION,
-        json_string(&run.job),
-        json_string(&run.id),
-        json_string(&run.trigger.to_db_string()),
-        json_string(run.status.as_str()),
-        run.exit_code
-            .map_or_else(|| "null".into(), |c| c.to_string()),
-        run.started_at.as_millisecond(),
-        run.finished_at
-            .map_or_else(|| "null".into(), |t| t.as_millisecond().to_string()),
-        run.duration_ms
-            .map_or_else(|| "null".into(), |d| d.to_string()),
-        run.message
-            .as_deref()
-            .map_or_else(|| "null".into(), json_string),
-        json_string(&stdout),
-        json_string(&stderr),
+        "{}",
+        json!({
+            "schema": merged::SCHEMA_VERSION,
+            "job": run.job,
+            "run": {
+                "id": run.id,
+                "trigger": run.trigger.to_db_string(),
+                "status": run.status.as_str(),
+                "exit_code": run.exit_code,
+                "started_ms": run.started_at.as_millisecond(),
+                "finished_ms": run.finished_at.map(jiff::Timestamp::as_millisecond),
+                "duration_ms": run.duration_ms,
+                "message": run.message,
+            },
+            "stdout": stdout,
+            "stderr": stderr,
+        })
     );
     Ok(0)
 }
