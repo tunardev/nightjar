@@ -1,0 +1,20 @@
+[package]
+name = "nightjar-schedule"
+description = "cron expressions and plain-English schedules for nightjar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories = ["date-and-time", "parser-implementations"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+jiff.workspace = true
+jiff-cron.workspace = true
