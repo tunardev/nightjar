@@ -1,0 +1,30 @@
+[package]
+name = "nightjar-runner"
+description = "runs one nightjar job, captures its output and alerts when it fails"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories = ["date-and-time", "os"]
+
+[lints]
+workspace = true
+
+[dependencies]
+nightjar-core.workspace = true
+nightjar-config.workspace = true
+nightjar-schedule.workspace = true
+nightjar-store.workspace = true
+anyhow.workspace = true
+jiff.workspace = true
+libc.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+zeroize.workspace = true
