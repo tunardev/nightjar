@@ -1,0 +1,23 @@
+[package]
+name = "nightjar-remote"
+description = "runs nightjar commands on remote hosts over ssh"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories = ["date-and-time", "network-programming"]
+
+[lints]
+workspace = true
+
+[dependencies]
+nightjar-core.workspace = true
+anyhow.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
