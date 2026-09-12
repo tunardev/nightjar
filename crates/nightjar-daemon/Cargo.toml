@@ -1,0 +1,30 @@
+[package]
+name = "nightjar-daemon"
+description = "the nightjar daemon: ticks the schedule, spawns runs and catches up on missed ones"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories = ["date-and-time", "os"]
+
+[lints]
+workspace = true
+
+[dependencies]
+nightjar-core.workspace = true
+nightjar-config.workspace = true
+nightjar-runner.workspace = true
+nightjar-schedule.workspace = true
+nightjar-store.workspace = true
+anyhow.workspace = true
+jiff.workspace = true
+libc.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+rusqlite.workspace = true
+tempfile.workspace = true
