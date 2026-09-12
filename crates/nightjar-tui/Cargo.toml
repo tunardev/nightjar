@@ -1,0 +1,31 @@
+[package]
+name = "nightjar-tui"
+description = "the nightjar terminal interface"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories = ["command-line-interface", "date-and-time"]
+
+[lints]
+workspace = true
+
+[dependencies]
+nightjar-core.workspace = true
+nightjar-config.workspace = true
+nightjar-runner.workspace = true
+nightjar-store.workspace = true
+anyhow.workspace = true
+crossterm.workspace = true
+jiff.workspace = true
+libc.workspace = true
+ratatui.workspace = true
+signal-hook.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
