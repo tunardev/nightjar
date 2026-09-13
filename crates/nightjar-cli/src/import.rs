@@ -1,0 +1,320 @@
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result, bail};
+use nightjar_config::jobfile::write_job_file_atomic;
+use nightjar_core::format::quantity;
+use nightjar_core::paths::{Paths, validate_job_name};
+use nightjar_schedule::Schedule;
+use toml_edit::{DocumentMut, value};
+
+/// # Errors
+/// fails if the crontab cannot be read, or an imported job cannot be written
+pub fn cmd_import(from_stdin: bool, enable: bool) -> Result<i32> {
+    let source = read_crontab(from_stdin)?;
+    let paths = Paths::resolve()?;
+    paths.ensure_dirs()?;
+
+    let report = import_crontab(&paths, &source, enable);
+    let skipped = report.skipped.len();
+    print_report(&report, enable);
+    Ok(i32::from(skipped != 0))
+}
+
+fn read_crontab(from_stdin: bool) -> Result<String> {
+    if from_stdin {
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .context("reading crontab from stdin")?;
+        return Ok(buf);
+    }
+
+    let output = std::process::Command::new("crontab")
+        .arg("-l")
+        .output()
+        .context("running `crontab -l` (use --from-stdin to import from a file instead)")?;
+    let complaint = String::from_utf8_lossy(&output.stderr);
+    if complaint.contains("no crontab for") {
+        return Ok(String::new());
+    }
+    if !output.status.success() {
+        bail!("`crontab -l` failed: {}", complaint.trim());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+struct Imported {
+    name: String,
+    source_line: String,
+}
+
+struct ImportReport {
+    written: Vec<Imported>,
+    skipped: Vec<(String, String)>,
+    environment: Vec<String>,
+}
+
+fn import_crontab(paths: &Paths, source: &str, enable: bool) -> ImportReport {
+    let mut written = Vec::new();
+    let mut skipped = Vec::new();
+    let mut environment = Vec::new();
+
+    for raw_line in source.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if is_env_assignment(line) {
+            environment.push(line.to_string());
+            continue;
+        }
+        match import_line(paths, line, enable) {
+            Ok(name) => written.push(Imported {
+                name,
+                source_line: line.to_string(),
+            }),
+            Err(e) => skipped.push((line.to_string(), format!("{e:#}"))),
+        }
+    }
+
+    ImportReport {
+        written,
+        skipped,
+        environment,
+    }
+}
+
+fn import_line(paths: &Paths, line: &str, enable: bool) -> Result<String> {
+    if let Some(c) = line.chars().find(|c| c.is_control()) {
+        bail!(
+            "crontab line contains the control character {c:?}, which no job file can hold: \
+             {line:?}"
+        );
+    }
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    let schedule_fields = if tokens.first().is_some_and(|t| t.starts_with('@')) {
+        1
+    } else {
+        5
+    };
+    if tokens.len() <= schedule_fields {
+        bail!("not a crontab line (need a schedule and a command): {line:?}");
+    }
+    let schedule_expr = tokens[..schedule_fields].join(" ");
+    let command = tokens[schedule_fields..].join(" ");
+
+    Schedule::parse(&schedule_expr).with_context(|| format!("in crontab line {line:?}"))?;
+
+    let base = sanitize_job_name(basename_of(&command));
+    let (name, path) = unique_job_path(paths, &base)?;
+
+    write_job_file_atomic(
+        &path,
+        &build_import_toml(&command, &schedule_expr, enable, line),
+    )?;
+    Ok(name)
+}
+
+fn basename_of(command: &str) -> &str {
+    let first = command.split_whitespace().next().unwrap_or("job");
+    Path::new(first)
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("job")
+}
+
+fn sanitize_job_name(raw: &str) -> String {
+    let mut out = String::new();
+    let mut last_was_dash = false;
+    for c in raw.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+            out.push(c);
+            last_was_dash = c == '-';
+        } else if !last_was_dash {
+            out.push('-');
+            last_was_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        "job".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn unique_job_path(paths: &Paths, base: &str) -> Result<(String, PathBuf)> {
+    for suffix in 1u32.. {
+        let candidate = if suffix == 1 {
+            base.to_string()
+        } else {
+            format!("{base}-{suffix}")
+        };
+        validate_job_name(&candidate)?;
+        let path = paths.jobs_dir.join(format!("{candidate}.toml"));
+        if !path.exists() {
+            return Ok((candidate, path));
+        }
+    }
+    unreachable!("the search range is unbounded")
+}
+
+fn is_env_assignment(line: &str) -> bool {
+    let Some((name, _)) = line.split_once('=') else {
+        return false;
+    };
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn build_import_toml(command: &str, schedule: &str, enabled: bool, source_line: &str) -> String {
+    let mut doc = DocumentMut::new();
+    doc["command"] = value(command);
+    doc["schedule"] = value(schedule);
+    doc["enabled"] = value(enabled);
+    format!("# imported from crontab: {source_line}\n{doc}")
+}
+
+const fn next_steps(enable: bool) -> &'static str {
+    if enable {
+        "these run under nightjar now; remove or comment them out of your crontab, or they will run twice"
+    } else {
+        "review them, then remove them from cron and run `nightjar enable <job>` \
+         (or re-run import with --enable) when you're ready"
+    }
+}
+
+fn print_report(report: &ImportReport, enable: bool) {
+    if report.written.is_empty() {
+        println!("no crontab lines needed importing");
+    } else {
+        let disposition = if enable {
+            "enabled"
+        } else {
+            "disabled so they do not run twice while cron still has them"
+        };
+        println!(
+            "imported {} from your crontab, written {disposition}:",
+            quantity(report.written.len(), "job", "jobs")
+        );
+        for job in &report.written {
+            println!("  {} <- {}", job.name, job.source_line);
+        }
+        println!("{}", next_steps(enable));
+    }
+
+    if !report.environment.is_empty() {
+        println!(
+            "\n{} not imported; nightjar sets these per \
+             job, not per file:",
+            quantity(
+                report.environment.len(),
+                "crontab environment line",
+                "crontab environment lines"
+            )
+        );
+        for line in &report.environment {
+            println!("  {line}");
+        }
+        println!(
+            "a job that relied on one of these needs it as `env`, `shell` or `on_failure` in \
+             its own file"
+        );
+    }
+
+    for (line, reason) in &report.skipped {
+        eprintln!("import: could not import {line:?}: {reason}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_collapses_unsafe_runs_and_strips_leading_trailing_dashes() {
+        assert_eq!(sanitize_job_name("backup.sh"), "backup-sh");
+        assert_eq!(sanitize_job_name("/usr/bin/x"), "usr-bin-x");
+        assert_eq!(sanitize_job_name("already-safe_123"), "already-safe_123");
+        assert_eq!(sanitize_job_name("///"), "job");
+        assert_eq!(sanitize_job_name(""), "job");
+    }
+
+    #[test]
+    fn basename_of_takes_first_token_and_strips_directory() {
+        assert_eq!(basename_of("/usr/local/bin/backup.sh --full"), "backup.sh");
+        assert_eq!(basename_of("true"), "true");
+    }
+
+    #[test]
+    fn env_assignment_lines_are_recognised_and_ordinary_commands_are_not() {
+        assert!(is_env_assignment("SHELL=/bin/bash"));
+        assert!(is_env_assignment("MAILTO=me@example.com"));
+        assert!(!is_env_assignment("0 2 * * * true"));
+        assert!(!is_env_assignment("0 2 * * * FOO=bar ./script.sh"));
+    }
+
+    #[test]
+    fn unique_job_path_appends_numeric_suffix_when_path_collides() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_root(tmp.path());
+        paths.ensure_dirs().unwrap();
+
+        let (first, _) = unique_job_path(&paths, "backup").unwrap();
+        std::fs::write(paths.jobs_dir.join(format!("{first}.toml")), "").unwrap();
+
+        let (second, _) = unique_job_path(&paths, "backup").unwrap();
+        assert_ne!(first, second);
+        assert_eq!(second, "backup-2");
+    }
+
+    #[test]
+    fn crontab_shortcut_line_imports_with_its_shortcut_as_the_schedule() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_root(tmp.path());
+        paths.ensure_dirs().unwrap();
+
+        let report = import_crontab(
+            &paths,
+            "@daily /usr/local/bin/backup.sh --full\n@reboot /usr/bin/agent\n",
+            false,
+        );
+
+        assert_eq!(report.written.len(), 1, "skipped: {:?}", report.skipped);
+        assert_eq!(report.written[0].name, "backup-sh");
+        let body = std::fs::read_to_string(paths.jobs_dir.join("backup-sh.toml")).unwrap();
+        assert!(body.contains("schedule = \"@daily\""), "got: {body}");
+        assert!(body.contains("--full"), "got: {body}");
+
+        assert_eq!(report.skipped.len(), 1);
+        assert!(
+            report.skipped[0].1.contains("@reboot"),
+            "got: {:?}",
+            report.skipped[0]
+        );
+    }
+
+    #[test]
+    fn imported_jobs_default_to_disabled() {
+        let toml = build_import_toml("true", "0 2 * * *", false, "0 2 * * * true");
+        assert!(toml.contains("enabled = false"));
+        assert!(!toml.contains("enabled = true"));
+    }
+
+    #[test]
+    fn enable_flag_writes_enabled_true() {
+        let toml = build_import_toml("true", "0 2 * * *", true, "0 2 * * * true");
+        assert!(toml.contains("enabled = true"));
+    }
+
+    #[test]
+    fn source_line_is_preserved_as_leading_comment() {
+        let toml = build_import_toml("true", "0 2 * * *", false, "0 2 * * * true # nightly");
+        assert!(toml.starts_with("# imported from crontab: 0 2 * * * true # nightly\n"));
+    }
+}
