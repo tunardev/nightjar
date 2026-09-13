@@ -1,0 +1,17 @@
+allowed-duplicate-crates = [
+    "base64",
+    "bitflags",
+    "getrandom",
+    "hashbrown",
+    "phf",
+    "phf_generator",
+    "phf_macros",
+    "phf_shared",
+    "r-efi",
+    "signal-hook",
+    "supports-color",
+    "syn",
+    "thiserror",
+    "thiserror-impl",
+    "windows-sys",
+]
