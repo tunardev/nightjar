@@ -1,0 +1,28 @@
+name: Feature request
+description: Something nightjar should do and does not.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you were trying to do, and where nightjar stopped you.
+    validations:
+      required: true
+
+  - type: textarea
+    id: shape
+    attributes:
+      label: What it would look like
+      description: The job file, the command, or the output you would want.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      description: CONTRIBUTING.md lists what nightjar has decided not to do.
+      options:
+        - label: This is not fan-in, `@reboot`, or binding off loopback.
+          required: true

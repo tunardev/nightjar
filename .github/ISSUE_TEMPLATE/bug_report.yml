@@ -1,0 +1,61 @@
+name: Bug report
+description: A job did not run, or nightjar reported something that is not true.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what nightjar did instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: nightjar doctor
+      description: Paste the whole thing. It names the paths and the daemon state.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: job
+    attributes:
+      label: The job file
+      description: The .toml, with any secret locations left in. They are locations, not secrets.
+      render: toml
+    validations:
+      required: true
+
+  - type: textarea
+    id: run
+    attributes:
+      label: What the run recorded
+      description: Output of `nightjar logs <job> --json`, or `nightjar status <job> --json` if it never ran.
+      render: json
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `nightjar --version`.
+      placeholder: nightjar 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: macOS 15.4 arm64, or Debian 13 x86_64 with systemd
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Before you file
+      options:
+        - label: I ran `nightjar doctor` and it did not already name the fix.
+          required: true
